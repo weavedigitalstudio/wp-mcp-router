@@ -82,6 +82,23 @@ interface RawConfig {
   initTimeoutMs?: number;
 }
 
+/** Hosts allowed to use plain HTTP (local development only). */
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "[::1]", "localhost"]);
+
+/**
+ * Weave hardening: refuse plain-HTTP site URLs and endpoints for non-loopback
+ * hosts. Every request carries the Application Password as Basic auth, so a
+ * plain-HTTP site would leak an admin credential on the wire.
+ */
+function assertHttps(urlStr: string, context: string): void {
+  const u = new URL(urlStr);
+  if (u.protocol === "http:" && !LOOPBACK_HOSTS.has(u.hostname)) {
+    throw new Error(
+      `${context} uses plain HTTP (${urlStr}). Application Passwords travel as Basic auth on every request, so non-loopback sites must use https://.`,
+    );
+  }
+}
+
 function endpointFor(site: SiteConfig): string {
   if (site.endpoint && site.endpoint.trim()) return site.endpoint.trim();
   return site.url.replace(/\/+$/, "") + DEFAULT_MCP_PATH;
@@ -106,6 +123,8 @@ function normalizeSite(raw: Partial<SiteConfig>, index: number): SiteConfig {
     customHeaders: raw.customHeaders ?? undefined,
   };
   site.endpoint = endpointFor(site);
+  assertHttps(site.url, `Site "${site.id}" url`);
+  assertHttps(site.endpoint, `Site "${site.id}" endpoint`);
   return site;
 }
 

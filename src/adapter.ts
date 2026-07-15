@@ -195,22 +195,11 @@ export async function ensurePlugin(
     }
 
     case "missing": {
+      // Weave hardening: the router never installs plugins over the REST API.
+      // Installs stay a human decision (WP-CLI or a wp-admin upload); we only
+      // guide the manual path here.
       io.log(`  ${spec.name} is not installed — it ${spec.why}.`);
-      if (!(await io.confirm(`  Install ${spec.name} now?`, true))) return false;
-
-      // Try the .org slug first — free upgrade path the day it's listed there.
-      const orgErr = await installFromOrg(siteUrl, username, appPassword, spec.slug);
-      if (!orgErr) {
-        io.log(`  ✓ ${spec.name} installed and activated from WordPress.org.`);
-        return true;
-      }
-      if (spec.onOrg) {
-        io.log(`  ✗ Install failed: ${orgErr}`);
-        return false;
-      }
-
-      // Not on .org: REST can't install from a zip URL, so guide the human.
-      io.log(`  ${spec.name} isn't in the WordPress.org directory, so it needs a one-time manual upload:`);
+      io.log(`  Install it manually, then re-run this command:`);
       if (spec.zipUrl) io.log(`    1. Download the zip: ${spec.zipUrl}`);
       io.log(`    2. Upload it at: ${siteUrl}/wp-admin/plugin-install.php?tab=upload`);
       io.log(`    3. Click "Activate", then re-run this command.`);

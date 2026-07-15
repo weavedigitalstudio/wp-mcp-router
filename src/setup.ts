@@ -31,7 +31,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { DEFAULT_MCP_PATH, type SiteConfig } from "./config.js";
 import { userConfigDir } from "./paths.js";
-import { COMPANION_BLOCK_MCP, REQUIRED_PLUGIN, ensurePlugin, type EnsureIo } from "./adapter.js";
+import { REQUIRED_PLUGIN, ensurePlugin, type EnsureIo } from "./adapter.js";
 import { WpClient } from "./wp-client.js";
 
 const APP_NAME = "wp-mcp-router";
@@ -88,12 +88,22 @@ async function prompt(question: string): Promise<string> {
   }
 }
 
+/** Hosts allowed to use plain HTTP (local development only). */
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "[::1]", "localhost"]);
+
 /** Normalize a user-typed site into a clean base URL. */
 function normalizeSiteUrl(input: string): string {
   let url = input.trim().replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   // Validate it parses.
   const u = new URL(url);
+  // Weave hardening: the Application Password rides as Basic auth on every
+  // request, so plain HTTP is only acceptable against loopback dev sites.
+  if (u.protocol === "http:" && !LOOPBACK_HOSTS.has(u.hostname)) {
+    throw new Error(
+      `"${input.trim()}" uses plain HTTP. Non-loopback sites must use https:// so the Application Password is never sent in the clear.`,
+    );
+  }
   return `${u.protocol}//${u.host}`;
 }
 
@@ -299,8 +309,9 @@ export async function addSite(argUrl?: string): Promise<number> {
   let siteUrl: string;
   try {
     siteUrl = normalizeSiteUrl(raw);
-  } catch {
-    log(`"${raw}" is not a valid URL.`);
+  } catch (err) {
+    const msg = (err as Error).message;
+    log(msg.includes("plain HTTP") ? msg : `"${raw}" is not a valid URL.`);
     return 1;
   }
 
@@ -403,8 +414,9 @@ export async function addSite(argUrl?: string): Promise<number> {
     }
   }
 
-  // Recommended companion: content abilities the router can actually call.
-  await ensurePlugin(siteUrl, cred.user_login, cred.password, COMPANION_BLOCK_MCP, ensureIo());
+  // Weave hardening: the upstream companion-plugin step (gk-block-mcp from a
+  // third-party fork) is removed. Content abilities come from weave-abilities,
+  // which is provisioned per site by a human via WP-CLI.
 
   log(`\nDone. Run  ${selfCmd("--doctor")}  to see everything, or`);
   log(`${selfCmd("install")}  to wire it into Claude / Cursor / Codex.`);

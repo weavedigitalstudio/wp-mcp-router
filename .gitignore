@@ -11,3 +11,4 @@ sites.local.json
 
 # local audit logs
 *.jsonl
+.DS_Store
