@@ -41,15 +41,6 @@ export const REQUIRED_PLUGIN: PluginSpec = {
   zipUrl: "https://github.com/WordPress/mcp-adapter/releases/latest",
 };
 
-export const COMPANION_BLOCK_MCP: PluginSpec = {
-  slug: "gk-block-mcp",
-  name: "Block MCP by GravityKit",
-  why: "registers content abilities (create/edit posts, resolve URLs, terms, media) for the router to call (recommended)",
-  onOrg: false,
-  // Fork with Abilities API registration; PR to upstream GravityKit/block-mcp pending.
-  zipUrl: "https://github.com/danieliser/block-mcp/releases/latest",
-};
-
 function authHeader(username: string, appPassword: string): string {
   return "Basic " + Buffer.from(`${username}:${appPassword}`).toString("base64");
 }

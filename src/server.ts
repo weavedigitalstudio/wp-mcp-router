@@ -158,7 +158,7 @@ export function buildServer(config: FleetConfig): Server {
       {
         name: "wp_get_content_by_url",
         description:
-          "Resolve a WordPress URL (or site-relative path) to its underlying post/page — id, type, title, status — in one step, instead of listing content and filtering yourself. Optionally include the full post info. Requires the target site to expose a URL-resolve ability (gk-block-mcp/resolve-url); falls back with a clear message if it doesn't.",
+          "Resolve a WordPress URL (or site-relative path) to its underlying post/page — id, type, title, status — in one step, instead of listing content and filtering yourself. Optionally include the full post info. Requires the target site to expose a URL-resolve ability (any ability named *resolve-url, e.g. gk-block-mcp/resolve-url); falls back with a clear message if it doesn't.",
         inputSchema: {
           type: "object",
           properties: {
@@ -332,8 +332,9 @@ export function buildServer(config: FleetConfig): Server {
           if (!url) return fail("url is required.");
 
           // Find a URL-resolver ability the target site actually exposes.
-          // gk-block-mcp/resolve-url is the fleet-standard; leave room for
-          // other plugins to register an equivalent under a *resolve-url name.
+          // Prefer gk-block-mcp/resolve-url if present, else any *resolve-url
+          // ability. Note: weave-abilities registers none as of 28 Aug 2026,
+          // so on Weave sites this tool fails until one exists.
           const cat = await catalog.getCatalog(site.id);
           const resolver =
             cat.byName.has(RESOLVE_URL_ABILITY)
@@ -346,7 +347,7 @@ export function buildServer(config: FleetConfig): Server {
             return fail(`Site "${site.id}" has no URL-resolver ability.`, {
               needed: RESOLVE_URL_ABILITY,
               available_on: alsoOn,
-              hint: "Install/activate gk-block-mcp on this site, or use wp_search_abilities to find a site that can resolve URLs.",
+              hint: "No plugin on this site registers a *resolve-url ability. Use wp_search_abilities to find one that does, or list content with the site's own abilities and match the slug.",
             });
           }
 

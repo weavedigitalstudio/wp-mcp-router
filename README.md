@@ -57,9 +57,11 @@ Each target site needs the [`mcp-adapter`](https://github.com/WordPress/mcp-adap
 active (it registers the `/wp-json/mcp/…` endpoint the router talks to). `add-site` and
 `--doctor` check for it: if it's installed but inactive they offer to activate it, and if
 it's missing they walk you through the one-time install (this requires connecting as a user
-who can manage plugins). `add-site` also offers
-[Block MCP](https://github.com/danieliser/block-mcp/releases/latest), a recommended companion
-that registers content abilities (posts, blocks, media, terms) for the router to call.
+who can manage plugins). Content abilities come from whatever the site itself registers
+through the Abilities API; the router discovers them, it does not install them. On Weave
+sites that is `weave-abilities`. If a site runs GravityKit's
+[Block MCP](https://github.com/GravityKit/block-mcp) (2.1.0 and later register its
+block-level editing as Abilities), those show up too.
 
 ## Tools
 

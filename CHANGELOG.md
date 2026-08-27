@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Remove the dead `COMPANION_BLOCK_MCP` spec and the README's "recommended
+  companion" link. Both pointed at `danieliser/block-mcp`, whose latest release
+  is a stock 2.0.2 rollback zip with no abilities in it; the abilities work in
+  that fork (PRs #48 and #49 to GravityKit) was never merged. GravityKit's own
+  Block MCP registers Abilities since 2.1.0 and needs no help from the router.
+- `wp_get_content_by_url` accepts any `*resolve-url` ability and says plainly
+  when a site has none, instead of telling you to install `gk-block-mcp`.
+
 ## 0.5.0: Weave takes over the fork
 
 From this release `weavedigitalstudio/wp-mcp-router` is its own line, not a
