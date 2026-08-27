@@ -170,8 +170,48 @@ interface AuthResult {
 }
 
 /**
+ * Ask the site whether it will even serve the authorize URL before opening a
+ * browser on it.
+ *
+ * Why: with --auto the callback rides in the query string as
+ * success_url=http://127.0.0.1:<port>/callback, and web application firewalls
+ * treat a loopback address in a query string as an SSRF probe. GridPane's 7G
+ * WAF (7g-mappings.conf, bad_querystring rule 10: localhost|loopback|127.0.0.1)
+ * answers 403 from nginx before WordPress runs; verified on dev-bellbird,
+ * 2026-08-28. Without this check the browser lands on a 403 page and we sit
+ * out the full five-minute timeout before falling back to paste. Across a
+ * batch of fifty sites that is unusable.
+ *
+ * An unauthenticated GET is enough to tell: WordPress answers 302 to
+ * wp-login.php (or 200 when a session exists); only a firewall or host rule
+ * answers 4xx. Rejecting here makes connectOne fall back to paste at once.
+ */
+export async function preflightAuthorizeUrl(authorizeUrl: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(authorizeUrl, {
+      method: "GET",
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    throw new Error(`Could not reach the authorize page: ${(err as Error).message}`);
+  }
+  // Nothing useful in the body; release the socket.
+  await res.body?.cancel().catch(() => undefined);
+
+  if (res.status === 200 || (res.status >= 300 && res.status < 400)) return;
+  const firewall =
+    res.status === 403 || res.status === 406
+      ? " A web firewall (GridPane 7G, 6G, or similar) is blocking the loopback callback URL in the query string."
+      : "";
+  throw new Error(`The site answered HTTP ${res.status} for the authorize URL.${firewall}`);
+}
+
+/**
  * Run the WordPress Application Passwords authorization flow for one site.
- * Resolves with the minted credential. Rejects if the user denies or times out.
+ * Resolves with the minted credential. Rejects if the user denies or times out,
+ * or if the pre-flight shows the site will not serve the authorize URL.
  */
 async function authorizeApplicationPassword(siteUrl: string): Promise<AuthResult> {
   return new Promise<AuthResult>((resolve, reject) => {
@@ -224,7 +264,7 @@ async function authorizeApplicationPassword(siteUrl: string): Promise<AuthResult
     }
 
     // Bind to an ephemeral localhost port, then build the authorize URL.
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, "127.0.0.1", async () => {
       const addr = server.address();
       const port = typeof addr === "object" && addr ? addr.port : 0;
       const successUrl = `http://127.0.0.1:${port}/callback`;
@@ -233,6 +273,15 @@ async function authorizeApplicationPassword(siteUrl: string): Promise<AuthResult
         `?app_name=${encodeURIComponent(APP_NAME)}` +
         `&app_id=${appId}` +
         `&success_url=${encodeURIComponent(successUrl)}`;
+
+      // Don't open a browser on a URL the site's firewall will 403.
+      try {
+        await preflightAuthorizeUrl(authorizeUrl);
+      } catch (err) {
+        cleanup();
+        reject(err);
+        return;
+      }
 
       log();
       log("Opening your browser to approve the connection…");
@@ -348,9 +397,12 @@ async function connectOne(siteUrl: string, opts: ConnectOptions = {}): Promise<C
   //     don't paste anything. The http://127.0.0.1 success_url IS spec-valid
   //     (WP allows the 127.0.0.1 / [::1] loopback host over http; `localhost` is
   //     NOT allowed), and needs no public IP — the site just redirects *your*
-  //     browser to *your* machine. It fails only if the site's own is_ssl() is
-  //     false (e.g. a reverse proxy hides HTTPS from WordPress), in which case
-  //     the authorize page errors regardless — so paste is the safe default.
+  //     browser to *your* machine. Two known ways it fails: the site's own
+  //     is_ssl() is false (a reverse proxy hides HTTPS from WordPress), or a
+  //     web firewall rejects the loopback address in the query string (GridPane
+  //     7G rule 10 does, verified 2026-08-28). preflightAuthorizeUrl catches the
+  //     second before a browser opens, so the fallback to paste is immediate.
+  //     Paste is the safe default.
   let cred: AuthResult;
   try {
     cred = opts.auto ? await authorizeApplicationPassword(siteUrl) : await manualAuthorize(siteUrl);

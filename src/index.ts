@@ -31,8 +31,10 @@ Usage:
   wp-mcp-router add-site [url]    Connect one WordPress site. Opens the browser
                                  to approve; WordPress shows the password, you
                                  paste it. Add --auto to catch it via a
-                                 localhost callback instead (nicer, but many
-                                 production sites reject the loopback URL).
+                                 localhost callback instead (nicer, but web
+                                 firewalls such as GridPane 7G reject the
+                                 loopback URL; when one does, this falls back
+                                 to paste straight away).
   wp-mcp-router connect-batch <template.json>
                                  Connect every site in a secret-free template
                                  (ids, labels, URLs) in one pass. Approve each in
