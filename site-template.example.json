@@ -1,0 +1,7 @@
+{
+  "_comment": "Secret-free site template. Weave fills in id, label and url; you run 'wp-mcp-router connect-batch site-template.json' and approve each site in your browser. No password is ever pasted into this file.",
+  "sites": [
+    { "id": "acme", "label": "Acme Ltd", "url": "https://acme-dev.weaveclient.site" },
+    { "id": "beta", "label": "Beta Trust", "url": "https://beta-dev.weaveclient.site" }
+  ]
+}

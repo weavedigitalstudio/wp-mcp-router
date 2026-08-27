@@ -294,26 +294,48 @@ async function manualAuthorize(siteUrl: string): Promise<AuthResult> {
   return { user_login: username.trim(), password: password.trim() };
 }
 
-/* ------------------------------------------------------------- add-site -- */
+/* ------------------------------------------------------ connect one site -- */
+
+/** Options for connecting a single site. */
+export interface ConnectOptions {
+  /**
+   * Registry id to store the site under.
+   *
+   * Weave hands out a secret-free template whose ids are already agreed, and
+   * those ids are what `wp_run` takes as its `site` argument. A derived id
+   * would silently disagree with every runbook and client AGENTS.md, so the
+   * template's id wins whenever one is supplied.
+   */
+  id?: string;
+  /** Human label for the site. Defaults to the hostname. */
+  label?: string;
+  /** Catch the credential on a localhost callback instead of asking for a paste. */
+  auto?: boolean;
+  /** Suppress the trailing "what next" hints. Batch prints its own summary. */
+  quiet?: boolean;
+}
+
+/** Result of one site connection, so a batch run can summarise at the end. */
+export interface ConnectOutcome {
+  id: string;
+  url: string;
+  /** A credential was minted and written to the registry. */
+  saved: boolean;
+  /** The MCP endpoint answered using that credential. */
+  mcpOk: boolean;
+  error?: string;
+}
 
 /**
- * `wp-mcp-router add-site [url]` — authorize + persist one site, then verify.
+ * Authorize one site, persist the credential, verify the MCP endpoint.
+ *
+ * Split out of addSite so connect-batch drives the identical path per site
+ * without duplicating the registry write or the mcp-adapter repair, and so a
+ * failure on site 40 of 70 returns a result rather than exiting the process.
  */
-export async function addSite(argUrl?: string): Promise<number> {
-  const raw = argUrl || (await prompt("WordPress site URL (e.g. example.com): "));
-  if (!raw) {
-    log("No site URL given.");
-    return 1;
-  }
-
-  let siteUrl: string;
-  try {
-    siteUrl = normalizeSiteUrl(raw);
-  } catch (err) {
-    const msg = (err as Error).message;
-    log(msg.includes("plain HTTP") ? msg : `"${raw}" is not a valid URL.`);
-    return 1;
-  }
+async function connectOne(siteUrl: string, opts: ConnectOptions = {}): Promise<ConnectOutcome> {
+  const id = opts.id || siteIdFrom(siteUrl);
+  const outcome: ConnectOutcome = { id, url: siteUrl, saved: false, mcpOk: false };
 
   log(`\nConnecting to ${siteUrl} …`);
 
@@ -329,34 +351,30 @@ export async function addSite(argUrl?: string): Promise<number> {
   //     browser to *your* machine. It fails only if the site's own is_ssl() is
   //     false (e.g. a reverse proxy hides HTTPS from WordPress), in which case
   //     the authorize page errors regardless — so paste is the safe default.
-  const auto = process.argv.includes("--auto");
-
   let cred: AuthResult;
   try {
-    cred = auto ? await authorizeApplicationPassword(siteUrl) : await manualAuthorize(siteUrl);
+    cred = opts.auto ? await authorizeApplicationPassword(siteUrl) : await manualAuthorize(siteUrl);
   } catch (err) {
-    if (auto) {
+    if (opts.auto) {
       log(`\n⚠️  Automatic authorization didn't complete: ${(err as Error).message}`);
       log("   Falling back to manual approval…");
       try {
         cred = await manualAuthorize(siteUrl);
       } catch (err2) {
-        log(`\n✗ ${(err2 as Error).message}`);
-        return 1;
+        outcome.error = (err2 as Error).message;
+        return outcome;
       }
     } else {
-      log(`\n✗ ${(err as Error).message}`);
-      return 1;
+      outcome.error = (err as Error).message;
+      return outcome;
     }
   }
 
   const registryPath = defaultRegistryPath();
   const reg = readRegistry(registryPath);
-
-  const id = siteIdFrom(siteUrl);
   const site: Partial<SiteConfig> = {
     id,
-    label: new URL(siteUrl).host,
+    label: opts.label || new URL(siteUrl).host,
     url: siteUrl,
     username: cred.user_login,
     appPassword: cred.password,
@@ -369,7 +387,8 @@ export async function addSite(argUrl?: string): Promise<number> {
   if (!reg.defaultSite) reg.defaultSite = id;
 
   writeRegistry(registryPath, reg);
-  log(`\n✓ Saved credentials for "${id}" to ${registryPath}`);
+  outcome.saved = true;
+  log(`✓ Saved credentials for "${id}" to ${registryPath}`);
 
   // Verify against the live endpoint so the user knows it actually works.
   log("Verifying the connection…");
@@ -395,6 +414,7 @@ export async function addSite(argUrl?: string): Promise<number> {
 
   try {
     await verify();
+    outcome.mcpOk = true;
     log(`✓ ${siteUrl} is reachable and speaking MCP.`);
   } catch (err) {
     log(`⚠️  MCP endpoint check failed: ${(err as Error).message}`);
@@ -404,13 +424,16 @@ export async function addSite(argUrl?: string): Promise<number> {
     if (ok) {
       try {
         await verify();
+        outcome.mcpOk = true;
         log(`✓ ${siteUrl} is reachable and speaking MCP.`);
       } catch (err2) {
+        outcome.error = (err2 as Error).message;
         log(`⚠️  Still failing after activation: ${(err2 as Error).message}`);
-        log("   Credentials are stored regardless — re-run add-site once resolved.");
+        log("   Credentials are stored regardless — re-run once resolved.");
       }
     } else {
-      log("   Credentials are stored regardless — re-run add-site after installing mcp-adapter.");
+      outcome.error = (err as Error).message;
+      log("   Credentials are stored regardless — re-run after installing mcp-adapter.");
     }
   }
 
@@ -418,8 +441,210 @@ export async function addSite(argUrl?: string): Promise<number> {
   // third-party fork) is removed. Content abilities come from weave-abilities,
   // which is provisioned per site by a human via WP-CLI.
 
+  return outcome;
+}
+
+/* ------------------------------------------------------------- add-site -- */
+
+/**
+ * `wp-mcp-router add-site [url]` — authorize + persist one site, then verify.
+ */
+export async function addSite(argUrl?: string, opts: ConnectOptions = {}): Promise<number> {
+  const raw = argUrl || (await prompt("WordPress site URL (e.g. example.com): "));
+  if (!raw) {
+    log("No site URL given.");
+    return 1;
+  }
+
+  let siteUrl: string;
+  try {
+    siteUrl = normalizeSiteUrl(raw);
+  } catch (err) {
+    const msg = (err as Error).message;
+    log(msg.includes("plain HTTP") ? msg : `"${raw}" is not a valid URL.`);
+    return 1;
+  }
+
+  const outcome = await connectOne(siteUrl, {
+    ...opts,
+    auto: opts.auto ?? process.argv.includes("--auto"),
+  });
+
+  if (!outcome.saved) {
+    log(`\n✗ ${outcome.error ?? "Could not obtain a credential."}`);
+    return 1;
+  }
+
   log(`\nDone. Run  ${selfCmd("--doctor")}  to see everything, or`);
   log(`${selfCmd("install")}  to wire it into Claude / Cursor / Codex.`);
+  return 0;
+}
+
+/* -------------------------------------------------------- connect-batch -- */
+
+/**
+ * `wp-mcp-router connect-batch <template.json>` — walk a secret-free site
+ * template, authorizing each site in turn.
+ *
+ * Why this exists. The registry is a single JSON document holding one
+ * Application Password per site. Assembling it by hand means minting a password
+ * in wp-admin, copying it, and pasting it into the right slot of a growing JSON
+ * blob, once per site per person. At two sites that is a minor chore. At fifty
+ * it is hours of careful clipboard work that cannot be delegated to an agent,
+ * because from the first paste the document is full of live credentials.
+ *
+ * The template carries only ids, labels and URLs, so it contains no secrets and
+ * can be shared, reviewed, diffed and generated by a tool. This command turns it
+ * into a complete registry using WordPress core's own authorize flow, so the
+ * operator approves in the browser and never handles a password.
+ *
+ * Resumable by design: a site that already holds a credential is skipped unless
+ * --force is passed. Getting forty sites in and hitting one bad host must not
+ * mean redoing the forty.
+ */
+export async function connectBatch(templatePath?: string): Promise<number> {
+  const path = templatePath || (await prompt("Path to the site template JSON: "));
+  if (!path) {
+    log("No template given.");
+    return 1;
+  }
+  if (!existsSync(path)) {
+    log(`Template not found: ${path}`);
+    return 1;
+  }
+
+  let template: Registry;
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    template = { ...parsed, sites: Array.isArray(parsed.sites) ? parsed.sites : [] };
+  } catch (err) {
+    log(`Template is not valid JSON: ${(err as Error).message}`);
+    return 1;
+  }
+
+  if (template.sites.length === 0) {
+    log('Template has no "sites" array, or it is empty.');
+    log('Expected shape: { "sites": [ { "id": "acme", "label": "Acme", "url": "https://acme.example" } ] }');
+    return 1;
+  }
+
+  const auto = process.argv.includes("--auto");
+  const force = process.argv.includes("--force");
+
+  // A site counts as already done only if it carries a credential. An entry
+  // seeded from the template (id + url, no password) must not be skipped.
+  const registryPath = defaultRegistryPath();
+  const done = new Set(
+    readRegistry(registryPath)
+      .sites.filter((s) => typeof s.appPassword === "string" && s.appPassword.trim() !== "")
+      .map((s) => s.id),
+  );
+
+  const total = template.sites.length;
+  log(`\nConnecting ${total} site(s) from ${path}`);
+  log(`Registry: ${registryPath}`);
+  if (auto) log("Mode: automatic (localhost callback)");
+  else log("Mode: manual paste. Add --auto to catch the password automatically.");
+  if (done.size > 0 && !force) log(`${done.size} site(s) already hold a credential and will be skipped (--force to redo).`);
+
+  const results: ConnectOutcome[] = [];
+  const skipped: string[] = [];
+
+  for (let i = 0; i < total; i++) {
+    const entry = template.sites[i];
+    const rawUrl = typeof entry.url === "string" ? entry.url : "";
+    const id = typeof entry.id === "string" && entry.id ? entry.id : rawUrl ? siteIdFrom(rawUrl) : `site-${i + 1}`;
+
+    if (!rawUrl) {
+      results.push({ id, url: "", saved: false, mcpOk: false, error: 'template entry has no "url"' });
+      continue;
+    }
+    if (done.has(id) && !force) {
+      skipped.push(id);
+      continue;
+    }
+
+    let siteUrl: string;
+    try {
+      siteUrl = normalizeSiteUrl(rawUrl);
+    } catch (err) {
+      results.push({ id, url: rawUrl, saved: false, mcpOk: false, error: (err as Error).message });
+      continue;
+    }
+
+    log(`\n[${i + 1}/${total}] ${id}`);
+    try {
+      results.push(
+        await connectOne(siteUrl, {
+          id,
+          label: typeof entry.label === "string" ? entry.label : undefined,
+          auto,
+        }),
+      );
+    } catch (err) {
+      // One unexpected throw must not abandon the remaining sites.
+      results.push({ id, url: siteUrl, saved: false, mcpOk: false, error: (err as Error).message });
+    }
+  }
+
+  const saved = results.filter((r) => r.saved);
+  const failed = results.filter((r) => !r.saved);
+  const degraded = saved.filter((r) => !r.mcpOk);
+
+  log(`\n${"-".repeat(60)}`);
+  log(`Connected:  ${saved.length}`);
+  if (skipped.length) log(`Skipped:    ${skipped.length} (already had a credential)`);
+  if (degraded.length) {
+    log(`Saved but not speaking MCP: ${degraded.length}`);
+    for (const r of degraded) log(`   • ${r.id} — ${r.error ?? "endpoint check failed"}`);
+  }
+  if (failed.length) {
+    log(`Failed:     ${failed.length}`);
+    for (const r of failed) log(`   • ${r.id} — ${r.error ?? "no credential obtained"}`);
+  }
+
+  if (saved.length > 0) {
+    log(`\nRegistry written to ${registryPath}`);
+    log(`Next:  ${selfCmd("--doctor")}    check every site`);
+    log(`       ${selfCmd("export")}      print the registry for your secret store`);
+  }
+
+  // Failing sites are reportable, not fatal: the operator wants the rest saved.
+  return failed.length === 0 ? 0 : 1;
+}
+
+/* --------------------------------------------------------------- export -- */
+
+/**
+ * `wp-mcp-router export` — print the registry to stdout for a secret store.
+ *
+ * Compact single-line JSON by default. 1Password's dotenv export reinserts line
+ * breaks into long values, which breaks a pretty-printed registry on the way
+ * back in; one line survives that round trip. Pass --pretty for a readable copy.
+ *
+ * Everything explanatory goes to stderr so the stdout stream stays pipeable.
+ */
+export async function exportRegistry(): Promise<number> {
+  const registryPath = defaultRegistryPath();
+  if (!existsSync(registryPath)) {
+    process.stderr.write(`No registry at ${registryPath}. Run ${selfCmd("connect-batch <template.json>")} first.\n`);
+    return 1;
+  }
+
+  const reg = readRegistry(registryPath);
+  if (reg.sites.length === 0) {
+    process.stderr.write(`Registry at ${registryPath} has no sites.\n`);
+    return 1;
+  }
+
+  const withCred = reg.sites.filter((s) => typeof s.appPassword === "string" && s.appPassword.trim() !== "").length;
+  process.stderr.write(
+    `wp-mcp-router export — ${reg.sites.length} site(s), ${withCred} with credentials, from ${registryPath}\n`,
+  );
+  process.stderr.write("This output contains live Application Passwords. Pipe it, do not paste it into a chat.\n\n");
+
+  const pretty = process.argv.includes("--pretty");
+  process.stdout.write(pretty ? JSON.stringify(reg, null, 2) + "\n" : JSON.stringify(reg) + "\n");
   return 0;
 }
 

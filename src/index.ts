@@ -6,6 +6,8 @@
  *   wp-mcp-router setup           → guided first-run: connect a site + wire in a client
  *   wp-mcp-router add-site [url]   → connect a WordPress site via the browser
  *                                    (Application Passwords authorize flow)
+ *   wp-mcp-router connect-batch <f> → walk a secret-free site template, connecting each
+ *   wp-mcp-router export           → print the registry for a secret store
  *   wp-mcp-router install [client] → inject the server into Claude / Cursor config
  *   wp-mcp-router --doctor         → hit every site, report ability counts, exit
  *   wp-mcp-router --help           → usage
@@ -16,7 +18,7 @@ import { loadConfig } from "./config.js";
 import { buildServer } from "./server.js";
 import { Catalog } from "./catalog.js";
 import { auditStatus } from "./audit.js";
-import { addSite, install, setup, selfCmd, ensureIo } from "./setup.js";
+import { addSite, connectBatch, exportRegistry, install, setup, selfCmd, ensureIo } from "./setup.js";
 import { REQUIRED_PLUGIN, ensurePlugin, probePlugin } from "./adapter.js";
 
 const HELP = `wp-mcp-router — one MCP connection for a fleet of WordPress sites
@@ -31,6 +33,16 @@ Usage:
                                  paste it. Add --auto to catch it via a
                                  localhost callback instead (nicer, but many
                                  production sites reject the loopback URL).
+  wp-mcp-router connect-batch <template.json>
+                                 Connect every site in a secret-free template
+                                 (ids, labels, URLs) in one pass. Approve each in
+                                 the browser; nothing is pasted into JSON by hand.
+                                 Skips sites that already hold a credential, so
+                                 an interrupted run resumes. --auto and --force
+                                 apply.
+  wp-mcp-router export           Print the registry as one line of JSON on stdout,
+                                 ready to pipe into a secret store. --pretty for
+                                 a readable copy. Contains live passwords.
   wp-mcp-router install [client] Add wp-mcp-router to an MCP client's config
                                  (Claude Desktop | Claude Code | Cursor | Codex).
   wp-mcp-router --doctor         Check connectivity + list abilities per site.
@@ -103,6 +115,13 @@ async function main() {
     // The URL (if any) is the first non-flag arg after the command.
     const url = args.filter((a) => !a.startsWith("-"))[1];
     process.exit(await addSite(url));
+  }
+  if (cmd === "connect-batch") {
+    const template = args.filter((a) => !a.startsWith("-"))[1];
+    process.exit(await connectBatch(template));
+  }
+  if (cmd === "export") {
+    process.exit(await exportRegistry());
   }
   if (cmd === "install") {
     const client = args.filter((a) => !a.startsWith("-")).slice(1).join(" ") || undefined;
