@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.0: Weave takes over the fork
+
+From this release `weavedigitalstudio/wp-mcp-router` is its own line, not a
+patch set on top of upstream. Daniel Iser wrote 0.1.0 to 0.4.0 (GPL-2.0-or-later,
+July 2026); everything below is Weave's, and the upstream repo has been quiet
+since 13 July 2026. Not published to npm: clone and build.
+
+- **Ownership.** `package.json` now names Weave as maintainer with Daniel Iser
+  credited as original author, points `repository`, `bugs` and `homepage` at the
+  Weave fork, and is marked `private` so it can never be published over the
+  upstream npm package by accident. `master` is the Weave line; the
+  `weave-hardening` and `weave-batch-connect` branches are folded into it.
+- **`connect-batch <template.json>`** walks a secret-free site template (ids,
+  labels, URLs), runs the WordPress authorize flow for each site, and writes the
+  registry. Resumable: sites that already hold a credential are skipped unless
+  `--force`. Invalid entries are reported and skipped, not fatal.
+- **`export`** prints the registry as one line of JSON for a secret store
+  (1Password's dotenv export reinserts line breaks into long values).
+- **`--auto` pre-flight.** Before opening a browser, `--auto` GETs the authorize
+  URL; a 4xx (GridPane's 7G firewall returns 403 for any query string containing
+  `127.0.0.1`) falls back to manual paste in seconds instead of after the
+  five-minute callback timeout. Five tests.
+- **Registry ids come from the template** (`ConnectOptions.id`), not from the
+  hostname, so they match what `wp_run` takes as `site`.
+- Carried over from `v0.4.0-weave.1` (16 July 2026): HTTPS enforced for
+  non-loopback sites; the REST plugin installer and the third-party companion
+  plugin step are removed, missing plugins get manual guidance only.
+
 ## 0.4.0 — required-plugin detection and guided install
 
 - `add-site` now verifies the MCP endpoint and, on failure, diagnoses the usual

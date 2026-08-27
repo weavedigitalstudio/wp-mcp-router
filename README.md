@@ -1,8 +1,15 @@
 # wp-mcp-router
 
-[![npm version](https://img.shields.io/npm/v/wp-mcp-router.svg)](https://www.npmjs.com/package/wp-mcp-router)
-[![CI](https://github.com/danieliser/wp-mcp-router/actions/workflows/ci.yml/badge.svg)](https://github.com/danieliser/wp-mcp-router/actions/workflows/ci.yml)
-[![license](https://img.shields.io/npm/l/wp-mcp-router.svg)](./LICENSE)
+[![CI](https://github.com/weavedigitalstudio/wp-mcp-router/actions/workflows/ci.yml/badge.svg)](https://github.com/weavedigitalstudio/wp-mcp-router/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](./LICENSE)
+
+> **Origins.** Forked from [danieliser/wp-mcp-router](https://github.com/danieliser/wp-mcp-router)
+> at v0.4.0 by [Weave Digital Studio](https://weave.co.nz) in July 2026 and
+> maintained here since 0.5.0. Daniel Iser wrote 0.1.0 to 0.4.0; the licence
+> (GPL-2.0-or-later) and his copyright are unchanged. What Weave changed and
+> when is in [CHANGELOG.md](./CHANGELOG.md). This fork is **not on npm**:
+> `npx wp-mcp-router` fetches the upstream package, so clone this repo and
+> `npm ci && npm run build` instead.
 
 **One MCP connection for all your WordPress sites.**
 
@@ -17,7 +24,9 @@ site that doesn't have it returns *"not on B; available on A and C"* instead of 
 ## Quick start
 
 ```bash
-npx wp-mcp-router setup
+git clone https://github.com/weavedigitalstudio/wp-mcp-router.git
+cd wp-mcp-router && npm ci && npm run build
+node dist/index.js setup
 ```
 
 The wizard connects your first site (opens your browser; you approve, WordPress mints a
@@ -28,12 +37,21 @@ and you're connected.
 Prefer the steps individually?
 
 ```bash
-npx wp-mcp-router add-site example.com   # connect a site (repeat per site)
-npx wp-mcp-router install                # add to your AI client's config
+node dist/index.js add-site example.com          # connect a site (repeat per site)
+node dist/index.js add-site example.com --auto   # same, caught on a localhost callback
+node dist/index.js install                       # add to your AI client's config
 ```
 
-Add more sites any time with `add-site` — they all live behind the one connection.
-`npx wp-mcp-router --doctor` checks connectivity and lists abilities per site.
+A fleet? Put ids, labels and URLs in a template (see `site-template.example.json`) and let
+the browser flow run once per site, then print the registry as one line for a secret store:
+
+```bash
+node dist/index.js connect-batch sites.json --auto   # skips sites already connected
+node dist/index.js export                            # one line of JSON on stdout
+```
+
+Add more sites any time with `add-site`; they all live behind the one connection.
+`node dist/index.js --doctor` checks connectivity and lists abilities per site.
 
 Each target site needs the [`mcp-adapter`](https://github.com/WordPress/mcp-adapter) plugin
 active (it registers the `/wp-json/mcp/…` endpoint the router talks to). `add-site` and
@@ -102,4 +120,6 @@ blast radius.
 
 ## License
 
-GPL-2.0-or-later.
+GPL-2.0-or-later. Copyright (C) 2026 Daniel Iser (0.1.0 to 0.4.0); modifications
+Copyright (C) 2026 Weave Digital Studio (0.5.0 onward). See [CHANGELOG.md](./CHANGELOG.md)
+for what changed and when.

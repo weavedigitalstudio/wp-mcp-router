@@ -1,6 +1,7 @@
 {
   "name": "wp-mcp-router",
-  "version": "0.4.0",
+  "version": "0.5.0",
+  "private": true,
   "description": "One MCP connection for a fleet of WordPress sites. Federates several mcp-adapter (Abilities API) sites behind a single MCP server with per-site capability discovery, cross-site search, fan-out, and a site-mismatch guard.",
   "type": "module",
   "bin": {
@@ -27,6 +28,27 @@
   "engines": {
     "node": ">=20"
   },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "license": "GPL-2.0-or-later",
+  "author": "Weave Digital Studio (https://weave.co.nz)",
+  "contributors": [
+    "Daniel Iser (original author, wp-mcp-router 0.1.0 to 0.4.0)"
+  ],
+  "homepage": "https://github.com/weavedigitalstudio/wp-mcp-router#readme",
+  "bugs": {
+    "url": "https://github.com/weavedigitalstudio/wp-mcp-router/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/weavedigitalstudio/wp-mcp-router.git"
+  },
   "keywords": [
     "mcp",
     "model-context-protocol",
@@ -39,23 +61,5 @@
     "ai",
     "claude",
     "cursor"
-  ],
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0"
-  },
-  "devDependencies": {
-    "tsx": "^4.19.0",
-    "typescript": "^5.6.0",
-    "@types/node": "^22.0.0"
-  },
-  "license": "GPL-2.0-or-later",
-  "author": "Daniel Iser",
-  "homepage": "https://github.com/danieliser/wp-mcp-router#readme",
-  "bugs": {
-    "url": "https://github.com/danieliser/wp-mcp-router/issues"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/danieliser/wp-mcp-router.git"
-  }
+  ]
 }
