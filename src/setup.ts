@@ -28,6 +28,7 @@ import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import { DEFAULT_MCP_PATH, type SiteConfig } from "./config.js";
 import { userConfigDir } from "./paths.js";
@@ -748,11 +749,24 @@ function clientTargets(): ClientTarget[] {
   return targets;
 }
 
+/**
+ * Absolute path to this build's entrypoint (`dist/index.js`).
+ *
+ * `install` must point clients at THIS checkout. `npx wp-mcp-router` fetches
+ * the UPSTREAM package from npm, which is a different, older codebase: this
+ * fork is `private: true` and deliberately unpublished. Emitting an npx line
+ * silently installs the wrong router, and the failure looks like missing
+ * abilities rather than a wrong binary.
+ */
+function routerEntrypoint(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), "index.js");
+}
+
 /** The mcpServers entry we inject. Uses the resolved registry path via env. */
 function serverEntry(registryPath: string): Record<string, unknown> {
   return {
-    command: "npx",
-    args: ["-y", "wp-mcp-router"],
+    command: process.execPath,
+    args: [routerEntrypoint()],
     env: { WP_MCP_ROUTER_CONFIG: registryPath },
   };
 }
@@ -853,8 +867,8 @@ function tomlBlock(registryPath: string): string {
   const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   return [
     `[mcp_servers.wp-mcp-router]`,
-    `command = "npx"`,
-    `args = ["-y", "wp-mcp-router@latest"]`,
+    `command = "${esc(process.execPath)}"`,
+    `args = ["${esc(routerEntrypoint())}"]`,
     ``,
     `[mcp_servers.wp-mcp-router.env]`,
     `WP_MCP_ROUTER_CONFIG = "${esc(registryPath)}"`,

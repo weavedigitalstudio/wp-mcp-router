@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`install` pointed every client at the wrong router.** Both the JSON entry
+  (Claude Code / Desktop / Cursor) and the TOML block (Codex) emitted
+  `npx -y wp-mcp-router`, which fetches the UPSTREAM npm package: a different,
+  older codebase. This fork is `private: true` and deliberately unpublished, so
+  anyone following the README's `install` line got 0.4.0 with none of the 0.5.0
+  work, and the symptom looked like missing abilities rather than a wrong
+  binary. Both writers now emit `process.execPath` plus an absolute path to this
+  checkout's `dist/index.js`. Re-run `install` after changing Node version, the
+  path is resolved at install time.
+
 - Remove the dead `COMPANION_BLOCK_MCP` spec and the README's "recommended
   companion" link. Both pointed at `danieliser/block-mcp`, whose latest release
   is a stock 2.0.2 rollback zip with no abilities in it; the abilities work in
