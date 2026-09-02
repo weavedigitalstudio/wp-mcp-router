@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.1: install points at this checkout
+
 - **`install` pointed every client at the wrong router.** Both the JSON entry
   (Claude Code / Desktop / Cursor) and the TOML block (Codex) emitted
   `npx -y wp-mcp-router`, which fetches the UPSTREAM npm package: a different,
