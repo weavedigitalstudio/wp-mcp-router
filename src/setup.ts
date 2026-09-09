@@ -26,7 +26,7 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "node:fs";
-import { homedir, platform } from "node:os";
+import { homedir, hostname, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
@@ -35,7 +35,12 @@ import { userConfigDir } from "./paths.js";
 import { REQUIRED_PLUGIN, ensurePlugin, type EnsureIo } from "./adapter.js";
 import { WpClient } from "./wp-client.js";
 
-const APP_NAME = "wp-mcp-router";
+// The Application Password label WordPress shows for this credential. WordPress refuses a
+// second password with the same name for the same user (since 5.7), and the fleet shares
+// weave_admin, so a fixed label made the second machine's connect fail. The machine name
+// keeps each machine's credential distinct and revocable on its own in wp-admin.
+const APP_ID = "wp-mcp-router";
+const APP_NAME = `${APP_ID} @ ${hostname().split(".")[0]}`;
 
 /* ---------------------------------------------------------------- helpers -- */
 
@@ -460,7 +465,7 @@ async function connectOne(siteUrl: string, opts: ConnectOptions = {}): Promise<C
     await c.call("initialize", {
       protocolVersion: "2025-06-18",
       capabilities: {},
-      clientInfo: { name: APP_NAME, version: "0.1.0" },
+      clientInfo: { name: APP_ID, version: "0.1.0" },
     });
     return true;
   };
