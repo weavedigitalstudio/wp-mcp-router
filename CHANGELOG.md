@@ -1,6 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.5.3: a misplaced key is refused, not dropped
+
+- **A misplaced key no longer vanishes.** The MCP SDK does not check a call
+  against a tool's inputSchema, so `wp_run` quietly ignored any top-level key it
+  did not know. Ability parameters sent as `parameters` instead of `arguments`
+  reached the site as `{}`, and an all-optional ability ran on its defaults and
+  reported success: `per_page: 8` came back as 50 on nursing-research-dev
+  (23 Sep 2026), and nothing said so. Every router tool now refuses a key it
+  does not declare, names it, lists what it does accept, and on `wp_run` and
+  `wp_run_across` says that ability parameters go inside `arguments`. A
+  non-object `arguments` (a JSON string, an array) is refused too.
+- Misspelt keys *inside* `arguments` are the site's job, not the router's, since
+  third-party schemas do not all declare their extras. weave-abilities 0.9.1
+  refuses them for `weave/*`.
 
 ## 0.5.1: install points at this checkout
 

@@ -63,6 +63,38 @@ function extractPostId(result: any): number | string | null {
   return typeof id === "number" || typeof id === "string" ? id : null;
 }
 
+/**
+ * Top-level keys a router tool does not declare. The MCP SDK does not check a
+ * call against the tool's inputSchema, so a misplaced key was dropped without a
+ * word: ability parameters sent as `parameters` instead of `arguments` reached
+ * the site as {}, and an all-optional ability ran on its defaults and reported
+ * success (per_page 8 came back as 50, nursing-research-dev, 23 Sep 2026).
+ */
+export function unknownToolArgs(
+  tools: Array<{ name: string; inputSchema: { properties?: Record<string, unknown> } }>,
+  name: string,
+  args: Record<string, unknown>,
+): { message: string; detail: Record<string, unknown> } | null {
+  const tool = tools.find((t) => t.name === name);
+  if (!tool) return null;
+  const accepted = Object.keys(tool.inputSchema.properties ?? {});
+  const unknown = Object.keys(args).filter((k) => !accepted.includes(k));
+  if ("arguments" in args && (typeof args.arguments !== "object" || args.arguments === null || Array.isArray(args.arguments))) {
+    return {
+      message: `${name}: "arguments" must be an object of the ability's parameters.`,
+      detail: { accepted },
+    };
+  }
+  if (unknown.length === 0) return null;
+  const takesArguments = accepted.includes("arguments");
+  return {
+    message: `${name} does not accept ${unknown.join(", ")}, so nothing ran.${
+      takesArguments ? " Ability parameters go inside \"arguments\"." : ""
+    }`,
+    detail: { unknown, accepted },
+  };
+}
+
 export function buildServer(config: FleetConfig): Server {
   const catalog = new Catalog(config);
   const siteIds = config.sites.map((s) => s.id);
@@ -80,100 +112,100 @@ export function buildServer(config: FleetConfig): Server {
     { capabilities: { tools: {} } },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      {
-        name: "wp_list_sites",
-        description:
-          "TIER 1 discovery — the fleet map. Returns each site's id, label, tags, ability count, and namespace GROUPS (e.g. 'popup-maker', 'fluent-crm'). Deliberately compact: no ability names, no schemas. Call this first to see which site is likely to have what you need, then use wp_search_abilities to drill in.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            refresh: { type: "boolean", description: "Force re-discovery of ability catalogs (ignore cache)." },
-          },
+  const tools = [
+    {
+      name: "wp_list_sites",
+      description:
+        "TIER 1 discovery — the fleet map. Returns each site's id, label, tags, ability count, and namespace GROUPS (e.g. 'popup-maker', 'fluent-crm'). Deliberately compact: no ability names, no schemas. Call this first to see which site is likely to have what you need, then use wp_search_abilities to drill in.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          refresh: { type: "boolean", description: "Force re-discovery of ability catalogs (ignore cache)." },
         },
       },
-      {
-        name: "wp_search_abilities",
-        description:
-          "TIER 2 discovery — drill into abilities. Keyword search across sites' ability catalogs (matches name, description, or namespace). Returns matches grouped by site with names + descriptions but NOT full schemas. Empty query lists everything for the specified sites. Use wp_get_ability for a specific ability's full schema.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Keyword, e.g. 'popup', 'contact', 'create'. Empty = list all." },
-            sites: { type: "array", items: { type: "string" }, description: "Limit to these site ids (default: all). Narrow with wp_list_sites first for large fleets." },
-          },
+    },
+    {
+      name: "wp_search_abilities",
+      description:
+        "TIER 2 discovery — drill into abilities. Keyword search across sites' ability catalogs (matches name, description, or namespace). Returns matches grouped by site with names + descriptions but NOT full schemas. Empty query lists everything for the specified sites. Use wp_get_ability for a specific ability's full schema.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Keyword, e.g. 'popup', 'contact', 'create'. Empty = list all." },
+          sites: { type: "array", items: { type: "string" }, description: "Limit to these site ids (default: all). Narrow with wp_list_sites first for large fleets." },
         },
       },
-      {
-        name: "wp_get_ability",
-        description:
-          "TIER 3 discovery — the full input/output schema and description for one ability on one site. Call this before wp_run when you need to know the exact parameters. Result is cached per (site, ability) with the same TTL as the site catalog.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            site: siteEnum,
-            ability_name: { type: "string", description: "Full ability name, e.g. 'popup-maker/create-popup'." },
-          },
-          required: ["ability_name"],
+    },
+    {
+      name: "wp_get_ability",
+      description:
+        "TIER 3 discovery — the full input/output schema and description for one ability on one site. Call this before wp_run when you need to know the exact parameters. Result is cached per (site, ability) with the same TTL as the site catalog.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          site: siteEnum,
+          ability_name: { type: "string", description: "Full ability name, e.g. 'popup-maker/create-popup'." },
         },
+        required: ["ability_name"],
       },
-      {
-        name: "wp_run",
-        description:
-          "Execute a WordPress ability on a single site. Guarded: if the ability is not available on the target site, returns an error naming the sites that DO have it (no blind cross-site calls).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            site: siteEnum,
-            ability_name: { type: "string", description: "Full ability name, e.g. 'core/get-site-info'." },
-            arguments: { type: "object", description: "Arguments object for the ability (see wp_get_ability)." },
-            compact: {
-              type: "boolean",
-              description:
-                "Losslessly strip _links / _embedded (HAL hypermedia noise) from the result to save context. Default false. No data an agent acts on is removed.",
-            },
+    },
+    {
+      name: "wp_run",
+      description:
+        "Execute a WordPress ability on a single site. Guarded: if the ability is not available on the target site, returns an error naming the sites that DO have it (no blind cross-site calls).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          site: siteEnum,
+          ability_name: { type: "string", description: "Full ability name, e.g. 'core/get-site-info'." },
+          arguments: { type: "object", description: "Arguments object for the ability (see wp_get_ability)." },
+          compact: {
+            type: "boolean",
+            description:
+              "Losslessly strip _links / _embedded (HAL hypermedia noise) from the result to save context. Default false. No data an agent acts on is removed.",
           },
-          required: ["ability_name"],
         },
+        required: ["ability_name"],
       },
-      {
-        name: "wp_run_across",
-        description:
-          "Execute the SAME ability on MANY sites in parallel (federation/fan-out). Sites that lack the ability are reported as skipped, not failed. Use for fleet-wide reads or coordinated writes.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            ability_name: { type: "string", description: "Full ability name to run on each site." },
-            arguments: { type: "object", description: "Arguments applied to every site." },
-            sites: { type: "array", items: { type: "string" }, description: "Target site ids (default: all not excluded from fan-out)." },
-            compact: {
-              type: "boolean",
-              description: "Losslessly strip _links / _embedded from each site's result. Default false.",
-            },
+    },
+    {
+      name: "wp_run_across",
+      description:
+        "Execute the SAME ability on MANY sites in parallel (federation/fan-out). Sites that lack the ability are reported as skipped, not failed. Use for fleet-wide reads or coordinated writes.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ability_name: { type: "string", description: "Full ability name to run on each site." },
+          arguments: { type: "object", description: "Arguments applied to every site." },
+          sites: { type: "array", items: { type: "string" }, description: "Target site ids (default: all not excluded from fan-out)." },
+          compact: {
+            type: "boolean",
+            description: "Losslessly strip _links / _embedded from each site's result. Default false.",
           },
-          required: ["ability_name"],
         },
+        required: ["ability_name"],
       },
-      {
-        name: "wp_get_content_by_url",
-        description:
-          "Resolve a WordPress URL (or site-relative path) to its underlying post/page — id, type, title, status — in one step, instead of listing content and filtering yourself. Optionally include the full post info. Requires the target site to expose a URL-resolve ability (any ability named *resolve-url, e.g. gk-block-mcp/resolve-url); falls back with a clear message if it doesn't.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            site: siteEnum,
-            url: { type: "string", description: "Full URL (https://site/path/) or site-relative path (/path/)." },
-            with_content: {
-              type: "boolean",
-              description: "Also fetch full post info (get-post-info) for the resolved post. Default false.",
-            },
+    },
+    {
+      name: "wp_get_content_by_url",
+      description:
+        "Resolve a WordPress URL (or site-relative path) to its underlying post/page — id, type, title, status — in one step, instead of listing content and filtering yourself. Optionally include the full post info. Requires the target site to expose a URL-resolve ability (any ability named *resolve-url, e.g. gk-block-mcp/resolve-url); falls back with a clear message if it doesn't.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          site: siteEnum,
+          url: { type: "string", description: "Full URL (https://site/path/) or site-relative path (/path/)." },
+          with_content: {
+            type: "boolean",
+            description: "Also fetch full post info (get-post-info) for the resolved post. Default false.",
           },
-          required: ["url"],
         },
+        required: ["url"],
       },
-    ],
-  }));
+    },
+  ];
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: rawArgs } = req.params;
@@ -210,6 +242,9 @@ export function buildServer(config: FleetConfig): Server {
     }
 
     async function handleTool(): Promise<any> {
+      const unknown = unknownToolArgs(tools, name, args);
+      if (unknown) return fail(unknown.message, unknown.detail);
+
       switch (name) {
         case "wp_list_sites": {
           const refresh = args.refresh === true;
