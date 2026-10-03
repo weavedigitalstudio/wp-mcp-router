@@ -7,6 +7,10 @@
  *   1. POST `initialize`  → response carries an `Mcp-Session-Id` header.
  *   2. POST `notifications/initialized` with that header.
  *   3. Every subsequent `tools/list` / `tools/call` MUST echo the header.
+ *   4. Every request after `initialize` also carries `MCP-Protocol-Version`,
+ *      set to the version the server agreed. mcp-adapter 0.7.0 (2 October
+ *      2026) refuses a 2025-06-18 or later session without it, with
+ *      -32600 "MCP-Protocol-Version header is required". 0.6.x ignored it.
  *
  * Responses may come back as plain JSON or as a single SSE `data:` frame
  * depending on negotiated Accept; both are handled.
@@ -29,7 +33,12 @@
 
 import type { SiteConfig } from "./config.js";
 
-const PROTOCOL_VERSION = "2025-06-18";
+/**
+ * The revision we propose. mcp-adapter 0.6.x and 0.7.0 both serve 2025-11-25
+ * natively; 0.7.0 still accepts 2025-06-18 but only as a legacy alias. The
+ * server's answer is what we send back in MCP-Protocol-Version.
+ */
+const PROTOCOL_VERSION = "2025-11-25";
 
 /**
  * Session-invalid detection constants — taken verbatim from
@@ -145,11 +154,13 @@ function mapNetworkError(siteId: string, endpoint: string, err: unknown): string
 
 interface Session {
   id: string | null;
+  /** Protocol version the server agreed in `initialize`. */
+  protocolVersion: string | null;
   initializing: Promise<void> | null;
 }
 
 export class WpClient {
-  private session: Session = { id: null, initializing: null };
+  private session: Session = { id: null, protocolVersion: null, initializing: null };
   private nextId = 1;
 
   constructor(
@@ -177,10 +188,13 @@ export class WpClient {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       Authorization: basicAuth(this.site),
-      "User-Agent": `wp-mcp-router/0.5.0 (+https://github.com/weavedigitalstudio/wp-mcp-router)`,
+      "User-Agent": `wp-mcp-router/0.5.4 (+https://github.com/weavedigitalstudio/wp-mcp-router)`,
     };
     if (opts.withSession && this.session.id) {
       headers["Mcp-Session-Id"] = this.session.id;
+    }
+    if (opts.withSession && this.session.protocolVersion) {
+      headers["MCP-Protocol-Version"] = this.session.protocolVersion;
     }
     if (this.site.customHeaders) {
       for (const [k, v] of Object.entries(this.site.customHeaders)) {
@@ -242,6 +256,8 @@ export class WpClient {
 
       const sid = initRes.headers.get("mcp-session-id");
       this.session.id = sid; // may be null for stateless servers; that's fine.
+      const agreed = initRes.body?.result?.protocolVersion;
+      this.session.protocolVersion = typeof agreed === "string" && agreed ? agreed : PROTOCOL_VERSION;
 
       // Acknowledge initialization (notification → no response expected).
       await this.rawPost(
@@ -271,6 +287,7 @@ export class WpClient {
     let res = await send();
     if (res.body?.error && method !== "initialize" && isInvalidSessionError(res.body.error)) {
       this.session.id = null;
+      this.session.protocolVersion = null;
       await this.ensureSession();
       res = await send();
     }

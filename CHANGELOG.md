@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.4: works with mcp-adapter 0.7.0
+
+- **mcp-adapter 0.7.0 (2 October 2026) would have broken every call.** After
+  `initialize`, 0.7.0 refuses any request without an `MCP-Protocol-Version`
+  header: `-32600 MCP-Protocol-Version header is required for a 2025-06-18
+  session`. The router never sent it, because 0.6.x did not check. Found on
+  a local dev site, the first one on 0.7.0. The router now records the version
+  the site agrees in `initialize` and sends it on every later request.
+- Proposes `2025-11-25` instead of `2025-06-18`. Both adapter versions serve it
+  natively; 0.7.0 only accepts 2025-06-18 as a legacy alias.
+- `setup`'s connection check lists tools instead of sending a second
+  `initialize`, so it exercises a post-initialize request, which is where the
+  header check bites.
+- Checked live against a local site on 0.7.0 and two hosted dev sites on
+  0.6.1. Nothing else in the 0.7.0 breaking list
+  touches the router: it sends no batches, never called `tools/list/all`, and
+  reads results from the text block, so the dropped `structuredContent` for list
+  results does not matter.
+
 ## 0.5.3: a misplaced key is refused, not dropped
 
 - **A misplaced key no longer vanishes.** The MCP SDK does not check a call

@@ -462,11 +462,10 @@ async function connectOne(siteUrl: string, opts: ConnectOptions = {}): Promise<C
       30_000,
       25_000,
     );
-    await c.call("initialize", {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: { name: APP_ID, version: "0.1.0" },
-    });
+    // call() runs the initialize handshake itself; listing tools then proves
+    // a post-initialize request works too, which is where mcp-adapter 0.7.0's
+    // MCP-Protocol-Version check bites.
+    await c.listTools();
     return true;
   };
 
