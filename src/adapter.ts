@@ -35,10 +35,9 @@ export const REQUIRED_PLUGIN: PluginSpec = {
   slug: "mcp-adapter",
   name: "MCP Adapter",
   why: "registers the /wp-json/mcp/… endpoint the router talks to (required)",
-  // Not in the wordpress.org directory yet; we still attempt a slug install
-  // first so this starts working automatically the day it lands there.
-  onOrg: false,
-  zipUrl: "https://github.com/WordPress/mcp-adapter/releases/latest",
+  // On wordpress.org since 0.7.0 (2 October 2026), so a human installs it
+  // from Plugins > Add New like any other plugin.
+  onOrg: true,
 };
 
 function authHeader(username: string, appPassword: string): string {
@@ -174,7 +173,7 @@ export async function ensurePlugin(
       return false;
 
     case "inactive": {
-      io.log(`  ${spec.name} is installed but not active — it ${spec.why}.`);
+      io.log(`  ${spec.name} is installed but not active. It ${spec.why}.`);
       if (!(await io.confirm(`  Activate ${spec.name} now?`, true))) return false;
       const err = await activatePlugin(siteUrl, username, appPassword, probe.plugin!);
       if (err) {
@@ -189,14 +188,21 @@ export async function ensurePlugin(
       // Weave hardening: the router never installs plugins over the REST API.
       // Installs stay a human decision (WP-CLI or a wp-admin upload); we only
       // guide the manual path here.
-      io.log(`  ${spec.name} is not installed — it ${spec.why}.`);
+      io.log(`  ${spec.name} is not installed. It ${spec.why}.`);
       io.log(`  Install it manually, then re-run this command:`);
-      if (spec.zipUrl) io.log(`    1. Download the zip: ${spec.zipUrl}`);
-      io.log(`    2. Upload it at: ${siteUrl}/wp-admin/plugin-install.php?tab=upload`);
-      io.log(`    3. Click "Activate", then re-run this command.`);
-      if (spec.zipUrl && (await io.confirm("  Open both pages in your browser?", true))) {
-        io.openUrl(spec.zipUrl);
-        io.openUrl(`${siteUrl}/wp-admin/plugin-install.php?tab=upload`);
+      if (spec.onOrg) {
+        const searchUrl = `${siteUrl}/wp-admin/plugin-install.php?s=${encodeURIComponent(spec.slug)}&tab=search&type=term`;
+        io.log(`    1. Open Plugins > Add New: ${searchUrl}`);
+        io.log(`    2. Install "${spec.name}", click "Activate", then re-run this command.`);
+        if (await io.confirm("  Open that page in your browser?", true)) io.openUrl(searchUrl);
+      } else {
+        if (spec.zipUrl) io.log(`    1. Download the zip: ${spec.zipUrl}`);
+        io.log(`    2. Upload it at: ${siteUrl}/wp-admin/plugin-install.php?tab=upload`);
+        io.log(`    3. Click "Activate", then re-run this command.`);
+        if (spec.zipUrl && (await io.confirm("  Open both pages in your browser?", true))) {
+          io.openUrl(spec.zipUrl);
+          io.openUrl(`${siteUrl}/wp-admin/plugin-install.php?tab=upload`);
+        }
       }
       return false;
     }

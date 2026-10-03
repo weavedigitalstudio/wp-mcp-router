@@ -18,7 +18,7 @@ wp-mcp-router is an MCP (stdio) server that fronts any number of WordPress sites
 via the [`mcp-adapter`](https://github.com/WordPress/mcp-adapter) plugin. Instead of one MCP
 server per site, you connect your AI client (Claude Desktop / Claude Code / Cursor / Codex)
 once and address each site by name. The router discovers what each site can actually do,
-lets you search abilities across all of them, and guards execution — calling an ability on a
+lets you search abilities across all of them, and guards execution: calling an ability on a
 site that doesn't have it returns *"not on B; available on A and C"* instead of an opaque error.
 
 ## Quick start
@@ -53,15 +53,31 @@ node dist/index.js export                            # one line of JSON on stdou
 Add more sites any time with `add-site`; they all live behind the one connection.
 `node dist/index.js --doctor` checks connectivity and lists abilities per site.
 
-Each target site needs the [`mcp-adapter`](https://github.com/WordPress/mcp-adapter) plugin
-active (it registers the `/wp-json/mcp/…` endpoint the router talks to). `add-site` and
-`--doctor` check for it: if it's installed but inactive they offer to activate it, and if
-it's missing they walk you through the one-time install (this requires connecting as a user
-who can manage plugins). Content abilities come from whatever the site itself registers
+Each target site needs the [MCP Adapter](https://wordpress.org/plugins/mcp-adapter/) plugin
+active (it registers the `/wp-json/mcp/…` endpoint the router talks to). It is on
+wordpress.org since 0.7.0, so install it from Plugins > Add New. `add-site` and `--doctor`
+check for it: if it's installed but inactive they offer to activate it, and if it's missing
+they open the Add New search for you. The router never installs plugins itself.
+
+**Adapter versions.** The router works with mcp-adapter 0.6.x and 0.7.0. **Sites on 0.7.0
+need router 0.5.4 or later:** 0.7.0 refuses every request that lacks an
+`MCP-Protocol-Version` header, which older routers did not send. Update the router before
+you update the adapter on any site it serves. Content abilities come from whatever the site itself registers
 through the Abilities API; the router discovers them, it does not install them. On Weave
 sites that is `weave-abilities`. If a site runs GravityKit's
 [Block MCP](https://github.com/GravityKit/block-mcp) (2.1.0 and later register its
 block-level editing as Abilities), those show up too.
+
+## Updating
+
+```bash
+cd wp-mcp-router
+git fetch && git reset --hard origin/master   # or `git pull` if you never rewrote history
+npm ci && npm run build
+```
+
+Then restart your AI client so it loads the new build. Your site registry lives outside the
+repo, so it is untouched.
 
 ## Tools
 
@@ -81,8 +97,8 @@ Every site-targeting tool takes a `site` argument; omit it to use the configured
 The site registry carries credentials, so it is **never committed**. Resolved at runtime, in
 priority order:
 
-1. `WP_MCP_ROUTER_SITES` — the whole registry as inline JSON in one env var.
-2. `WP_MCP_ROUTER_CONFIG` — path to a JSON file.
+1. `WP_MCP_ROUTER_SITES`: the whole registry as inline JSON in one env var.
+2. `WP_MCP_ROUTER_CONFIG`: path to a JSON file.
 3. `./sites.json` next to the package (gitignored).
 4. `~/.config/wp-mcp-router/sites.json` (Windows: `%APPDATA%\wp-mcp-router\sites.json`).
 
@@ -101,23 +117,23 @@ WordPress [Application Password](https://make.wordpress.org/core/2020/11/05/appl
 
 Useful per-site / global options:
 
-- `endpoint` — override the MCP endpoint (default `<url>/wp-json/mcp/mcp-adapter-default-server`).
-- `customHeaders` — extra headers merged into every request (Cloudflare Access service
+- `endpoint`: override the MCP endpoint (default `<url>/wp-json/mcp/mcp-adapter-default-server`).
+- `customHeaders`: extra headers merged into every request (Cloudflare Access service
   tokens, WAF allow-list headers, etc.).
-- `requestTimeoutMs` (default 120000) / `initTimeoutMs` (default 25000) — call and
+- `requestTimeoutMs` (default 120000) / `initTimeoutMs` (default 25000): call and
   handshake timeouts; also settable via `WP_MCP_ROUTER_TIMEOUT_MS` / `WP_MCP_ROUTER_INIT_TIMEOUT_MS`.
 
 ## Security
 
-Auth is per-site WordPress Application Passwords (Basic auth over HTTPS) — scoped, revocable,
+Auth is per-site WordPress Application Passwords (Basic auth over HTTPS): scoped, revocable,
 never your real login; rotate by deleting and re-minting the app password. Credentials live
 only in the gitignored registry or env vars, never in the repo or the npm package. Every
 routed call is written to a local audit log (`~/.local/state/wp-mcp-router/audit.jsonl`,
 Windows: `%LOCALAPPDATA%\wp-mcp-router\audit.jsonl`; args redacted, owner-only permissions;
 `WP_MCP_ROUTER_AUDIT=off` disables it, `WP_MCP_ROUTER_AUDIT_FILE` relocates it).
 
-**Recommendation:** connect each site as a dedicated limited-role user — enough to edit
-content, not enough to execute code or manage users — so a leaked credential has a small
+**Recommendation:** connect each site as a dedicated limited-role user, enough to edit
+content, not enough to execute code or manage users, so a leaked credential has a small
 blast radius.
 
 ## License

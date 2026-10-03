@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.5: MCP Adapter is on wordpress.org
+
+- When a site is missing MCP Adapter, `setup`, `add-site` and `--doctor` now open
+  that site's Plugins > Add New search for it, instead of a GitHub zip and the
+  upload screen. The adapter moved to wordpress.org with 0.7.0. The router
+  still never installs plugins itself.
+- README: which adapter versions work (0.7.0 needs router 0.5.4 or later), an
+  Updating section, and a few dashes reworded.
+
 ## 0.5.4: works with mcp-adapter 0.7.0
 
 - **mcp-adapter 0.7.0 (2 October 2026) would have broken every call.** After

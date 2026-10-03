@@ -188,7 +188,7 @@ export class WpClient {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       Authorization: basicAuth(this.site),
-      "User-Agent": `wp-mcp-router/0.5.4 (+https://github.com/weavedigitalstudio/wp-mcp-router)`,
+      "User-Agent": `wp-mcp-router/0.5.5 (+https://github.com/weavedigitalstudio/wp-mcp-router)`,
     };
     if (opts.withSession && this.session.id) {
       headers["Mcp-Session-Id"] = this.session.id;
