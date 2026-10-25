@@ -25,6 +25,7 @@ import type { FleetConfig } from "./config.js";
 import { Catalog, EXECUTE_TOOL } from "./catalog.js";
 import { compactResult } from "./compact.js";
 import * as audit from "./audit.js";
+import { SiteRules } from "./site-rules.js";
 
 /** Fleet-standard abilities used by the convenience wrappers. */
 const RESOLVE_URL_ABILITY = "gk-block-mcp/resolve-url";
@@ -97,6 +98,7 @@ export function unknownToolArgs(
 
 export function buildServer(config: FleetConfig): Server {
   const catalog = new Catalog(config);
+  const rules = new SiteRules(config, catalog);
   const siteIds = config.sites.map((s) => s.id);
   const siteEnum = { type: "string" as const, enum: siteIds, description: "Target site id." };
 
@@ -120,7 +122,11 @@ export function buildServer(config: FleetConfig): Server {
       inputSchema: {
         type: "object",
         properties: {
-          refresh: { type: "boolean", description: "Force re-discovery of ability catalogs (ignore cache)." },
+          refresh: {
+            type: "boolean",
+            description:
+              "Force re-discovery of ability catalogs (ignore cache), and send each site's agent rules again with its next wp_run.",
+          },
         },
       },
     },
@@ -152,7 +158,7 @@ export function buildServer(config: FleetConfig): Server {
     {
       name: "wp_run",
       description:
-        "Execute a WordPress ability on a single site. Guarded: if the ability is not available on the target site, returns an error naming the sites that DO have it (no blind cross-site calls).",
+        "Execute a WordPress ability on a single site. Guarded: if the ability is not available on the target site, returns an error naming the sites that DO have it (no blind cross-site calls). The first wp_run on a site in each session also returns site_rules: the rules that site's administrators set for AI agents (Block MCP custom instructions). Follow them for every call on that site. Start a new site with a read such as weave/get-site-info, so the rules arrive before any write.",
       inputSchema: {
         type: "object",
         properties: {
@@ -250,8 +256,12 @@ export function buildServer(config: FleetConfig): Server {
           const refresh = args.refresh === true;
           const rows = await Promise.all(
             config.sites.map(async (s) => {
-              if (refresh) await catalog.getCatalog(s.id, true);
+              if (refresh) {
+                await catalog.getCatalog(s.id, true);
+                rules.reset(s.id);
+              }
               const { groups, error, abilityCount } = await catalog.siteGroups(s.id);
+              const agentRules = rules.status(s.id);
               return {
                 id: s.id,
                 label: s.label,
@@ -260,6 +270,7 @@ export function buildServer(config: FleetConfig): Server {
                 default: s.id === config.defaultSite,
                 ability_count: abilityCount,
                 groups,
+                ...(agentRules ? { agent_rules: agentRules } : {}),
                 ...(error ? { error } : {}),
               };
             }),
@@ -267,7 +278,7 @@ export function buildServer(config: FleetConfig): Server {
           return ok({
             default_site: config.defaultSite,
             sites: rows,
-            hint: "Use wp_search_abilities({sites:['<id>']}) to see abilities on a specific site, or wp_search_abilities({query:'…'}) to search across the fleet.",
+            hint: "Use wp_search_abilities({sites:['<id>']}) to see abilities on a specific site, or wp_search_abilities({query:'…'}) to search across the fleet. A site's agent rules arrive as site_rules with the first wp_run on it.",
           });
         }
 
@@ -312,19 +323,29 @@ export function buildServer(config: FleetConfig): Server {
             });
           }
 
-          let result = await catalog
-            .client(site.id)
-            .callTool(EXECUTE_TOOL, {
-              ability_name: abilityName,
-              parameters: (args.arguments as object) ?? {},
-            });
+          // The site's agent rules ride on its first wp_run each session. The
+          // lookup runs beside the call and never fails it (site-rules.ts).
+          const claim = rules.begin(site.id, abilityName);
+          let result;
+          try {
+            result = await catalog
+              .client(site.id)
+              .callTool(EXECUTE_TOOL, {
+                ability_name: abilityName,
+                parameters: (args.arguments as object) ?? {},
+              });
+          } catch (err) {
+            claim?.release();
+            throw err;
+          }
+          const siteRules = claim ? await claim.finish(result) : {};
           let compaction: { bytes_before: number; bytes_after: number } | undefined;
           if (args.compact === true) {
             const c = compactResult(result);
             result = c.result;
             compaction = { bytes_before: c.bytesBefore, bytes_after: c.bytesAfter };
           }
-          return ok({ site: site.id, ability: abilityName, result, ...(compaction ? { compaction } : {}) });
+          return ok({ site: site.id, ability: abilityName, ...siteRules, result, ...(compaction ? { compaction } : {}) });
         }
 
         case "wp_run_across": {

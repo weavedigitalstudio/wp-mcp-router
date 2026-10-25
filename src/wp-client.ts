@@ -49,6 +49,8 @@ const INVALID_SESSION_ERROR_CODES = new Set<number>([-32602, -32005]);
 const INVALID_SESSION_ERROR_MESSAGE = "Invalid or expired session";
 const SESSION_NOT_FOUND_ERROR_MESSAGE = "Session not found";
 
+const USER_AGENT = "wp-mcp-router/0.5.5 (+https://github.com/weavedigitalstudio/wp-mcp-router)";
+
 export interface JsonRpcError {
   code: number;
   message: string;
@@ -188,7 +190,7 @@ export class WpClient {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
       Authorization: basicAuth(this.site),
-      "User-Agent": `wp-mcp-router/0.5.5 (+https://github.com/weavedigitalstudio/wp-mcp-router)`,
+      "User-Agent": USER_AGENT,
     };
     if (opts.withSession && this.session.id) {
       headers["Mcp-Session-Id"] = this.session.id;
@@ -279,10 +281,10 @@ export class WpClient {
    * not applied to the initialize call itself (would loop), and not to other
    * error classes (would mask real failures).
    */
-  async call<T = any>(method: string, params: unknown = {}): Promise<T> {
+  async call<T = any>(method: string, params: unknown = {}, opts: { timeoutMs?: number } = {}): Promise<T> {
     await this.ensureSession();
     const send = () =>
-      this.rawPost({ jsonrpc: "2.0", id: this.nextId++, method, params });
+      this.rawPost({ jsonrpc: "2.0", id: this.nextId++, method, params }, { withSession: true, timeoutMs: opts.timeoutMs });
 
     let res = await send();
     if (res.body?.error && method !== "initialize" && isInvalidSessionError(res.body.error)) {
@@ -301,7 +303,66 @@ export class WpClient {
     return result?.tools ?? [];
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<any> {
-    return this.call("tools/call", { name, arguments: args });
+  /** `timeoutMs` overrides requestTimeoutMs for this one call (site-rules lookup). */
+  async callTool(name: string, args: Record<string, unknown>, opts: { timeoutMs?: number } = {}): Promise<any> {
+    return this.call("tools/call", { name, arguments: args }, opts);
   }
+
+  /**
+   * GET one WordPress REST route on the same origin as the MCP endpoint, with
+   * the same credentials and custom headers, so it reaches whatever the MCP
+   * calls reach (a WAF allow-list, Cloudflare Access) and sends the password
+   * nowhere new. Used for Block MCP's instructions route. Never throws on an
+   * HTTP status: the caller decides what a 404 or 429 means.
+   */
+  async restGet(route: string, timeoutMs: number): Promise<{ status: number; body: unknown }> {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      Authorization: basicAuth(this.site),
+      "User-Agent": USER_AGENT,
+    };
+    if (this.site.customHeaders) {
+      for (const [k, v] of Object.entries(this.site.customHeaders)) {
+        if (typeof v === "string") headers[k] = v;
+      }
+    }
+    const url = restRouteUrl(this.site.endpoint!, this.site.url, route);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { method: "GET", headers, signal: controller.signal });
+      const text = await res.text();
+      let body: unknown;
+      try {
+        body = text ? JSON.parse(text) : undefined;
+      } catch {
+        body = undefined; // a WAF challenge page or similar: not ours to parse.
+      }
+      return { status: res.status, body };
+    } catch (err) {
+      throw new Error(mapNetworkError(this.site.id, url, err));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
+/**
+ * The URL of a REST route on the site the MCP endpoint lives on. Follows the
+ * endpoint's form: `/wp-json/...` paths and `?rest_route=` sites both work.
+ * A custom endpoint with neither falls back to the site URL.
+ */
+export function restRouteUrl(endpoint: string, siteUrl: string, route: string): string {
+  const u = new URL(endpoint);
+  if (u.searchParams.has("rest_route")) {
+    u.searchParams.set("rest_route", route);
+    return u.toString();
+  }
+  const at = u.pathname.indexOf("/wp-json/");
+  if (at >= 0) {
+    u.pathname = u.pathname.slice(0, at) + "/wp-json" + route;
+    u.search = "";
+    return u.toString();
+  }
+  return siteUrl.replace(/\/+$/, "") + "/wp-json" + route;
 }

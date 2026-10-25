@@ -72,6 +72,13 @@ export interface FleetConfig {
    * this at startup, so a slow handshake stalls the whole agent boot).
    */
   initTimeoutMs: number;
+  /**
+   * ms; budget for looking up a site's agent rules (Block MCP custom
+   * instructions) beside its first wp_run. Default 5000. See site-rules.ts.
+   */
+  rulesTimeoutMs?: number;
+  /** false turns the site-rules lookup off. Default on. */
+  siteRules?: boolean;
 }
 
 interface RawConfig {
@@ -80,6 +87,8 @@ interface RawConfig {
   catalogTtlMs?: number;
   requestTimeoutMs?: number;
   initTimeoutMs?: number;
+  rulesTimeoutMs?: number;
+  siteRules?: boolean;
 }
 
 /** Hosts allowed to use plain HTTP (local development only). */
@@ -207,6 +216,8 @@ export function loadConfig(): { config: FleetConfig; source: string } {
       catalogTtlMs: raw.catalogTtlMs ?? Number(process.env.WP_MCP_ROUTER_CATALOG_TTL_MS ?? 5 * 60_000),
       requestTimeoutMs: raw.requestTimeoutMs ?? Number(process.env.WP_MCP_ROUTER_TIMEOUT_MS ?? 120_000),
       initTimeoutMs: raw.initTimeoutMs ?? Number(process.env.WP_MCP_ROUTER_INIT_TIMEOUT_MS ?? 25_000),
+      rulesTimeoutMs: raw.rulesTimeoutMs ?? Number(process.env.WP_MCP_ROUTER_RULES_TIMEOUT_MS ?? 5_000),
+      siteRules: raw.siteRules ?? !["off", "false", "0"].includes((process.env.WP_MCP_ROUTER_SITE_RULES ?? "").toLowerCase()),
     },
     source,
   };

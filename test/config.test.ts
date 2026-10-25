@@ -48,3 +48,26 @@ test("allows HTTPS sites", () => {
     assert.equal(config.sites[0].endpoint, "https://example.com/wp-json/mcp/mcp-adapter-default-server");
   });
 });
+
+test("site rules are on by default, with a 5 second budget", () => {
+  withSites([{ id: "ok", url: "https://example.com", ...cred }], () => {
+    const { config } = loadConfig();
+    assert.equal(config.siteRules, true);
+    assert.equal(config.rulesTimeoutMs, 5000);
+  });
+});
+
+test("WP_MCP_ROUTER_SITE_RULES=off, false or 0 turns site rules off", () => {
+  const prev = process.env.WP_MCP_ROUTER_SITE_RULES;
+  try {
+    for (const value of ["off", "false", "0", "OFF"]) {
+      process.env.WP_MCP_ROUTER_SITE_RULES = value;
+      withSites([{ id: "ok", url: "https://example.com", ...cred }], () => {
+        assert.equal(loadConfig().config.siteRules, false, value);
+      });
+    }
+  } finally {
+    if (prev === undefined) delete process.env.WP_MCP_ROUTER_SITE_RULES;
+    else process.env.WP_MCP_ROUTER_SITE_RULES = prev;
+  }
+});

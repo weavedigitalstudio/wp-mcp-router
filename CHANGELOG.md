@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased: each site's agent rules reach the agent
+
+- **Block MCP's custom instructions never reached a router agent.** A site's
+  custom instructions are its rules for AI agents: voice, content only, and
+  how to undo a write, including the 20 October 2026 correction that stops an
+  agent reverting to an autosave. Block MCP 2.2.1 serves them only to its own
+  Node server at initialize, and the router read nothing from initialize but
+  the protocol version. The Weave playbook said every agent reads them at
+  connect. Found in the Roots & Fruit review, 26 October 2026.
+- The first `wp_run` on each site in a session now carries a labelled
+  `site_rules` object (text, source, updated_at) ahead of the result. Later
+  calls on that site do not repeat it. The `wp_run` description says to
+  follow them, and to open each site with a read so the rules arrive before
+  any write.
+- Source order: `agent_instructions` from `weave/get-site-info`
+  (weave-abilities after 0.9.4), then Block MCP's public
+  `/wp-json/gk-block-api/v1/instructions` route, fetched from the MCP
+  endpoint's origin with the same credentials and custom headers. A 404 there
+  means no Block MCP, and nothing is added. When the agent's own first call is
+  `weave/get-site-info`, its result is read instead of calling it twice.
+- Never in the way: the lookup runs beside the call within 5 seconds
+  (`rulesTimeoutMs`, `WP_MCP_ROUTER_RULES_TIMEOUT_MS`). A failure adds a
+  one-line `site_rules_note` and is retried with the next `wp_run`, three
+  tries a session at most. The text is capped at 2,000 characters with
+  zero-width and bidi characters removed. `siteRules: false` or
+  `WP_MCP_ROUTER_SITE_RULES=off` turns it off.
+- `wp_list_sites` shows `agent_rules` per site once known, from the cache
+  only. `refresh: true` resends the rules with the next `wp_run`.
+- `wp_run_across` is unchanged.
+- Checked live against a local site (WordPress 7.1.3, mcp-adapter 0.6.1,
+  Block MCP 2.2.1) with weave-abilities after 0.9.4 and with 0.9.4 itself,
+  with Block MCP switched off, with empty instructions, and with a 1 ms budget.
+
 ## 0.5.5: MCP Adapter is on wordpress.org
 
 - When a site is missing MCP Adapter, `setup`, `add-site` and `--doctor` now open
