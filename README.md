@@ -86,7 +86,7 @@ repo, so it is untouched.
 | `wp_list_sites` | Sites + tags + ability counts + namespace groups. |
 | `wp_search_abilities` | Keyword search across sites; results grouped by site. |
 | `wp_get_ability` | Input/output schema for one ability on one site. |
-| `wp_run` | Execute an ability on **one** site (guarded). The first call on each site in a session also carries that site's agent rules (see below). |
+| `wp_run` | Execute an ability on **one** site (guarded). The first call on each site in a session also carries that site's agent rules, or the next call if they are not in yet (see below). |
 | `wp_run_across` | Execute the same ability on **many** sites in parallel. |
 | `wp_get_content_by_url` | Resolve a URL/path → post, optionally with full content. |
 
@@ -98,19 +98,27 @@ GravityKit Block MCP lets each site set custom instructions: its rules for AI ag
 voice, what not to edit, and how to undo a write. Block MCP hands them only to its own MCP
 server, so an agent on the router never saw them. The router now passes them on. The first
 `wp_run` on a site in each session carries a labelled `site_rules` object, placed before the
-result, with the text, where it came from and when it was last saved. Later calls on that site
-do not repeat it.
+result, with the text, where it came from and when it was last saved. If the rules are not in
+by the time that call returns, they come with a later `wp_run` on the site instead, with an
+`arrived_late` line. Later calls on that site do not repeat them.
 
-- Source: `agent_instructions` in `weave/get-site-info` (weave-abilities after 0.9.4), otherwise
-  Block MCP's public route `/wp-json/gk-block-api/v1/instructions`, fetched from the same origin
-  and with the same credentials as the MCP endpoint. A site without Block MCP gets nothing added.
-  If Block MCP is active with no rules set, the agent is told so in one line.
-- It never holds up the call. The lookup runs beside it within a 5 second budget. If the lookup
-  fails, the result gains a one-line `site_rules_note` and the next `wp_run` tries again, three
-  tries a session at most. The text is capped at Block MCP's own 2,000 characters, with
-  zero-width and bidi characters removed.
-- An agent's first call is often a write that already ran by the time the rules arrive, so the
-  `wp_run` description tells agents to start each site with a read such as `weave/get-site-info`.
+- Source: Block MCP's public route `/wp-json/gk-block-api/v1/instructions` and
+  `agent_instructions` in `weave/get-site-info` (weave-abilities after 0.9.4), asked at the same
+  time, the route first. The route's answer is enough on its own, and get-site-info's is used
+  when it has come in too, since it is the same text. When the agent's own call is
+  `weave/get-site-info`, its result is read instead of asking twice. The route is fetched from the
+  same origin and with the same credentials as the MCP endpoint. A site without Block MCP gets
+  nothing added. If Block MCP is active with no rules set, the agent is told so in one line.
+- It never holds up the call. The lookup starts with the agent's call and the router never waits
+  for it. A result that goes back before the rules are in says so in a one-line
+  `site_rules_pending`, and the first `wp_run` on the site to return after they are in carries
+  them, marked `arrived_late` with a count of the calls that ran without them. A lookup gets 5 seconds before it counts as failed.
+  A failure adds a one-line `site_rules_note` to the next result, and a later `wp_run` tries
+  again, three tries a session at most. The text is capped at Block MCP's own 2,000 characters,
+  with zero-width and bidi characters removed.
+- An agent's first call can run before the rules arrive, and it may be a write, so the `wp_run`
+  description tells agents to start each site with a read such as `weave/get-site-info`, and to
+  read again while `site_rules_pending` shows.
 - `wp_list_sites` shows `agent_rules` for a site once the router knows them, without fetching.
   `refresh: true` makes the next `wp_run` send the rules again.
 - `wp_run_across` carries no rules: on a fan-out they would repeat once per site.
@@ -145,9 +153,9 @@ Useful per-site / global options:
   tokens, WAF allow-list headers, etc.).
 - `requestTimeoutMs` (default 120000) / `initTimeoutMs` (default 25000): call and
   handshake timeouts; also settable via `WP_MCP_ROUTER_TIMEOUT_MS` / `WP_MCP_ROUTER_INIT_TIMEOUT_MS`.
-- `rulesTimeoutMs` (default 5000) / `siteRules` (default true): the site rules lookup's budget,
-  and a switch to turn it off; also settable via `WP_MCP_ROUTER_RULES_TIMEOUT_MS` /
-  `WP_MCP_ROUTER_SITE_RULES=off`.
+- `rulesTimeoutMs` (default 5000) / `siteRules` (default true): how long the site rules lookup
+  may take before it counts as failed (it never delays a call), and a switch to turn it off;
+  also settable via `WP_MCP_ROUTER_RULES_TIMEOUT_MS` / `WP_MCP_ROUTER_SITE_RULES=off`.
 
 ## Security
 

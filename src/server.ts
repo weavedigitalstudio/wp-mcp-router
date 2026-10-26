@@ -158,7 +158,7 @@ export function buildServer(config: FleetConfig): Server {
     {
       name: "wp_run",
       description:
-        "Execute a WordPress ability on a single site. Guarded: if the ability is not available on the target site, returns an error naming the sites that DO have it (no blind cross-site calls). The first wp_run on a site in each session also returns site_rules: the rules that site's administrators set for AI agents (Block MCP custom instructions). Follow them for every call on that site. Start a new site with a read such as weave/get-site-info, so the rules arrive before any write.",
+        "Execute a WordPress ability on a single site. Guarded: if the ability is not available on the target site, returns an error naming the sites that DO have it (no blind cross-site calls). The first wp_run on a site in each session also returns site_rules: the rules that site's administrators set for AI agents (Block MCP custom instructions). Follow them for every call on that site. The router never waits for them: if they are not in when a call returns, the result says site_rules_pending and they come with the next wp_run on that site, marked arrived_late. Start a new site with a read such as weave/get-site-info, and read again while site_rules_pending shows, so the rules arrive before any write.",
       inputSchema: {
         type: "object",
         properties: {
@@ -278,7 +278,7 @@ export function buildServer(config: FleetConfig): Server {
           return ok({
             default_site: config.defaultSite,
             sites: rows,
-            hint: "Use wp_search_abilities({sites:['<id>']}) to see abilities on a specific site, or wp_search_abilities({query:'…'}) to search across the fleet. A site's agent rules arrive as site_rules with the first wp_run on it.",
+            hint: "Use wp_search_abilities({sites:['<id>']}) to see abilities on a specific site, or wp_search_abilities({query:'…'}) to search across the fleet. A site's agent rules arrive as site_rules with the first wp_run on it, or the next one if the lookup is slower than that call.",
           });
         }
 
@@ -324,7 +324,9 @@ export function buildServer(config: FleetConfig): Server {
           }
 
           // The site's agent rules ride on its first wp_run each session. The
-          // lookup runs beside the call and never fails it (site-rules.ts).
+          // lookup starts with the call and never fails or delays it: finish()
+          // attaches the rules if they are in, and leaves them for the next
+          // wp_run on the site if not (site-rules.ts).
           const claim = rules.begin(site.id, abilityName);
           let result;
           try {
@@ -338,7 +340,7 @@ export function buildServer(config: FleetConfig): Server {
             claim?.release();
             throw err;
           }
-          const siteRules = claim ? await claim.finish(result) : {};
+          const siteRules = claim ? claim.finish(result) : {};
           let compaction: { bytes_before: number; bytes_after: number } | undefined;
           if (args.compact === true) {
             const c = compactResult(result);

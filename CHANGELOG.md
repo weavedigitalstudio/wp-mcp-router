@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: each site's agent rules reach the agent
+## 0.5.6: each site's agent rules reach the agent
 
 - **Block MCP's custom instructions never reached a router agent.** A site's
   custom instructions are its rules for AI agents: voice, content only, and
@@ -10,28 +10,63 @@
   the protocol version. The Weave playbook said every agent reads them at
   connect. Found in the Roots & Fruit review, 26 October 2026.
 - The first `wp_run` on each site in a session now carries a labelled
-  `site_rules` object (text, source, updated_at) ahead of the result. Later
-  calls on that site do not repeat it. The `wp_run` description says to
-  follow them, and to open each site with a read so the rules arrive before
-  any write.
-- Source order: `agent_instructions` from `weave/get-site-info`
-  (weave-abilities after 0.9.4), then Block MCP's public
+  `site_rules` object (text, source, updated_at) ahead of the result. If the
+  rules are not in when that call returns, the result says so in a one-line
+  `site_rules_pending`, and the first `wp_run` on the site to return after
+  they are in carries them, with an `arrived_late` line counting the calls
+  that ran without them. Later calls on that site do not repeat them. The
+  `wp_run` description says to follow them, and to open each site with a
+  read, reading again while `site_rules_pending` shows, so the rules arrive
+  before any write.
+- Sources, asked at the same time with the route first: Block MCP's public
   `/wp-json/gk-block-api/v1/instructions` route, fetched from the MCP
-  endpoint's origin with the same credentials and custom headers. A 404 there
-  means no Block MCP, and nothing is added. When the agent's own first call is
-  `weave/get-site-info`, its result is read instead of calling it twice.
-- Never in the way: the lookup runs beside the call within 5 seconds
+  endpoint's origin with the same credentials and custom headers, and
+  `agent_instructions` from `weave/get-site-info` (weave-abilities after
+  0.9.4). The route's answer is enough on its own. get-site-info's is used
+  when it has come in too, since it is the same text, and it covers a route
+  that is blocked or rate-limited. A 404 on the route means no Block MCP, and
+  nothing is added. When the agent's own call is `weave/get-site-info`, its
+  result is read instead of calling it twice.
+- Never in the way: the router never waits for the lookup, so it adds nothing
+  to the agent's call. A lookup gets 5 seconds before it counts as failed
   (`rulesTimeoutMs`, `WP_MCP_ROUTER_RULES_TIMEOUT_MS`). A failure adds a
-  one-line `site_rules_note` and is retried with the next `wp_run`, three
-  tries a session at most. The text is capped at 2,000 characters with
-  zero-width and bidi characters removed. `siteRules: false` or
-  `WP_MCP_ROUTER_SITE_RULES=off` turns it off.
+  one-line `site_rules_note` to the next result and is retried by a later
+  `wp_run`, three tries a session at most. The text is capped at 2,000
+  characters with zero-width and bidi characters removed. `siteRules: false`
+  or `WP_MCP_ROUTER_SITE_RULES=off` turns it off.
+- **Fixed before release: the first build held the call.** 780cda7 (in the
+  live dist from 26 October 2026, never tagged) asked get-site-info, then the
+  route, one after the other, and held the agent's result until both
+  answered, up to the 5 second budget. Every fleet site was on weave-abilities
+  0.9.4 with no field, so every first `wp_run` paid both round trips, and a
+  slow site paid 5 seconds on each of its first three calls and never got its
+  rules. Found in review the same day.
+- Measured on a local site (WordPress 7.1.3, mcp-adapter 0.7.1, Block MCP
+  2.2.1, weave-abilities 0.9.4) with a mu-plugin slowing every REST request,
+  fresh router each run, median of five, first `wp_run` then second:
+  - 1 second per request: 780cda7 5.98 s then 1.21 s. 0.5.6 with rules on
+    4.69 s then 1.21 s, with rules off 4.87 s then 1.22 s.
+  - 3 seconds per request: 780cda7 14.63 s then 5.00 s, and no rules in any
+    run. 0.5.6 with rules on 12.72 s then 3.23 s, with rules off 12.97 s then
+    3.24 s. The rules came with the first call in 4 runs of 5 and with the
+    second, marked late, in 1.
+  - Agent's first call `weave/get-site-info` (median of three): 780cda7 15.95 s,
+    0.5.6 12.72 s, rules off 12.90 s at 3 seconds; 5.88 s, 4.89 s and 4.76 s
+    at 1 second.
+  - With the field (weave-abilities after 0.9.4), 0.5.6 matched rules off at
+    both delays, and 780cda7 did too, since one round trip fits beside the call.
+  - Rechecked on the final build, median of three: rules on 4.80 s, off 4.88 s
+    at 1 second; on 12.76 s, off 12.86 s at 3 seconds.
 - `wp_list_sites` shows `agent_rules` per site once known, from the cache
   only. `refresh: true` resends the rules with the next `wp_run`.
 - `wp_run_across` is unchanged.
-- Checked live against a local site (WordPress 7.1.3, mcp-adapter 0.6.1,
-  Block MCP 2.2.1) with weave-abilities after 0.9.4 and with 0.9.4 itself,
-  with Block MCP switched off, with empty instructions, and with a 1 ms budget.
+- `package-lock.json` carries the version again; it had stayed at 0.5.1.
+- Checked live on the same site with 0.5.6: Block MCP switched off (nothing
+  added), empty instructions (the one line), and a 1 ms budget on a slowed
+  site (a note on each of three calls, then nothing). On an unslowed site a
+  1 ms budget still delivered the rules, because the requests run up to
+  100 ms past the deadline and an answer that lands by the next call beats
+  the failure. The first build was also checked on mcp-adapter 0.6.1.
 
 ## 0.5.5: MCP Adapter is on wordpress.org
 
