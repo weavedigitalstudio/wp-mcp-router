@@ -14,7 +14,8 @@
  *   1. Block MCP's public route `/wp-json/gk-block-api/v1/instructions`, sent
  *      first. On sites running weave-abilities 0.9.4 or earlier it is the only
  *      source. A 404 there means Block MCP is not on the site, so there is
- *      nothing to send.
+ *      nothing to send, and it settles that without waiting for
+ *      get-site-info, whose field only exists when Block MCP is active.
  *   2. `agent_instructions` in weave/get-site-info (weave-abilities after
  *      0.9.4), over the MCP session the router already holds. It is the same
  *      text, so it is used whenever it has come in, and it covers a site whose
@@ -23,8 +24,10 @@
  *
  * It must never get in the way of the call it rides on. The lookup starts with
  * the agent's call and runs on its own: when the call returns, the rules go
- * with it if they are ready, and otherwise with the next wp_run on the site,
- * marked late. Nothing ever waits for the lookup. The first version asked the
+ * with it if they are ready, and otherwise with a later wp_run on the site,
+ * marked late. Nothing ever waits for the lookup, and a call that returns
+ * before it is done is told the check is running, never that rules are
+ * coming, since the site may set none. The first version asked the
  * two sources one after the other and held the agent's result until they
  * answered, up to 5 seconds, so a slow site paid that on each of its first
  * wp_runs (review of 780cda7, 26 October 2026).
@@ -170,13 +173,18 @@ function isText(answer: InfoAnswer | RouteAnswer): answer is Extract<RulesLookup
  * What the two sources say together, or undefined while that is not clear
  * yet. get-site-info's field wins, since it is the same text. A route answer
  * that carries the instructions (or says none are set) is enough on its own,
- * so the rules never wait on a second round trip. A 404 or a failure from the
- * route waits for get-site-info, which may still have the field. `final` is
- * the deadline: decide with whatever has come in.
+ * so the rules never wait on a second round trip. So is a 404: it means Block
+ * MCP is not active, and get-site-info only has the field when it is, so
+ * waiting for get-site-info could only ever end in the same "none". 0.5.6
+ * waited, and a call that returned in between was told rules were on the
+ * way when the site had none. A failure from the route still waits for
+ * get-site-info, which covers a route that is blocked or rate-limited.
+ * `final` is the deadline: decide with whatever has come in.
  */
 export function decideRules(info: InfoAnswer, route: RouteAnswer, final: boolean, budget: string): RulesLookup | undefined {
   if (isText(info)) return info;
   if (isText(route)) return route;
+  if (typeof route === "object" && route.kind === "absent") return route;
   if (!final && (info === "pending" || route === "pending")) return undefined;
   if (route === "pending") return { kind: "failed", reason: `no answer within ${budget}` };
   return route;
@@ -357,8 +365,9 @@ export class SiteRules {
    * (get-site-info's field when that came in too, and rules that came in
    * after the deadline rather than the failure it recorded) and the site's
    * state moves on. If not, the call is counted as one that ran without the
-   * rules, and its result says they are on the way, so an agent about to
-   * write knows to read once more first. A call that threw (`returned`
+   * rules, and its result says the check is still running, so an agent about
+   * to write knows to read once more first. That line promises nothing: the
+   * check may yet find the site sets no rules. A call that threw (`returned`
    * false) has no result to carry anything.
    */
   private deliver(siteId: string, returned: boolean): RulesAttachment {
@@ -373,8 +382,10 @@ export class SiteRules {
       job.ranWithout++;
       return {
         site_rules_pending:
-          `${siteId}'s agent rules are still being looked up. The router does not wait for them: they come with the next wp_run on this site. ` +
-          "Make that a read if you were about to write.",
+          `The router was still checking ${siteId} for agent rules when this call returned, and it does not wait. ` +
+          "Any rules the site sets come as site_rules with a later wp_run on it. " +
+          "Once a result here has no site_rules_pending, the check is done. " +
+          "Make your next call a read if you were about to write.",
       };
     }
     // What has come in by now beats what was recorded: get-site-info's field

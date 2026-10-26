@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.5.7: a site without Block MCP is never promised rules
+
+- **A first `wp_run` on a site without Block MCP could be told rules were
+  coming, and none ever came.** The route answered 404 quickly, but the
+  router waited for `weave/get-site-info` as well, in case it still had the
+  field. When the agent's call returned in between, its result carried
+  `site_rules_pending`, which said the rules "come with the next wp_run on
+  this site". The lookup then settled on "no Block MCP" and nothing followed.
+  An agent told to make its next call a read first did so for nothing, and
+  could go on waiting for rules the site does not have. Found in the final
+  review of 0.5.6, 26 October 2026.
+- A 404 from `/wp-json/gk-block-api/v1/instructions` now settles it on its
+  own. It means Block MCP is not active, and get-site-info only has
+  `agent_instructions` when it is (weave-abilities 0.9.5 adds the field only
+  when `GK_BLOCK_MCP_VERSION` is defined), so waiting could only ever end in
+  the same answer. get-site-info's field still wins if it is already in. A
+  route failure (a 403, a 429, a timeout) still waits for get-site-info,
+  which covers a route that is blocked or rate-limited.
+- The pending line no longer promises anything, since the lookup can still
+  be running when the site has no Block MCP (the 404 itself was slower than
+  the call). It now reads: the router was still checking the site for agent
+  rules when this call returned, and it does not wait; any rules the site
+  sets come as `site_rules` with a later `wp_run` on it; once a result there
+  has no `site_rules_pending`, the check is done; make the next call a read
+  if you were about to write. The `wp_run` and `wp_list_sites` descriptions
+  say "any rules the site sets" and "a later call" the same way.
+- Tests: two new cases for the race, one where get-site-info is slower than
+  the call (nothing added, `agent_rules` reads "none (no Block MCP)" at once)
+  and one where the 404 is (the pending line promises no rules, and the next
+  call carries nothing). Both fail on 0.5.6. The `decideRules` unit test now
+  expects a 404 to settle it, and a route failure still to wait.
+- Checked live on a local site (WordPress 7.1.3, mcp-adapter 0.7.1, Block MCP
+  2.2.1 switched off for the test, weave-abilities with the field) with a
+  temporary mu-plugin holding one request:
+  - get-site-info held 2 seconds: 0.5.6 returned the first call in 220 ms
+    with `site_rules_pending`, and the next two calls carried nothing. 0.5.7
+    added nothing to any of three calls, four runs out of four, with
+    `agent_rules` "none (no Block MCP)".
+  - The 404 route held 1.5 seconds: 0.5.7 returned the first call in 215 ms
+    with the new pending line, and the next two carried nothing.
+  - Block MCP switched back on: the rules (1,964 characters) came with the
+    first call, as before.
+
 ## 0.5.6: each site's agent rules reach the agent
 
 - **Block MCP's custom instructions never reached a router agent.** A site's

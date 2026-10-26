@@ -212,8 +212,8 @@ test("late: the call is never held, and rules that miss it go out with the next 
   const first = await timed("wp_run", { ability_name: "weave/get-post" });
   assert.ok(first.ms < 150, `the first call returned in ${first.ms} ms, not after the 300 ms lookup`);
   assert.equal(first.out.site_rules, undefined);
-  assert.match(first.out.site_rules_pending, /slow's agent rules are still being looked up/);
-  assert.match(first.out.site_rules_pending, /Make that a read if you were about to write/);
+  assert.match(first.out.site_rules_pending, /The router was still checking slow for agent rules when this call returned/);
+  assert.match(first.out.site_rules_pending, /Make your next call a read if you were about to write/);
   assert.match(first.out.result.content[0].text, /weave\/get-post/);
 
   const second = await timed("wp_run", { ability_name: "weave/get-post" });
@@ -391,6 +391,56 @@ test("a site without Block MCP adds nothing and is not asked again", async () =>
   await close();
 });
 
+test("no Block MCP, call faster than get-site-info: the route's 404 settles it, so nothing is promised", async () => {
+  // The race from the 0.5.6 review: the 404 is in before the call returns,
+  // but get-site-info is slower than the call. 0.5.6 waited on get-site-info,
+  // so the call went back with site_rules_pending, which promised rules with
+  // the next wp_run, and none ever came. A 404 means no Block MCP, and
+  // get-site-info only has the field when Block MCP is active, so the 404 is
+  // the answer on its own.
+  const log: Log = [];
+  globalThis.fetch = fakeFleet(
+    { bare: { abilities: ["weave/get-site-info", "weave/get-post"], siteInfoDelayMs: 300, runDelayMs: IN_TIME } },
+    log,
+  );
+  const { call, timed, close } = await connect(configFor(["bare"]));
+
+  const first = await timed("wp_run", { ability_name: "weave/get-post" });
+  assert.ok(first.ms < 200, `returned in ${first.ms} ms, not after the 300 ms get-site-info`);
+  assert.deepEqual(Object.keys(first.out), ["site", "ability", "result"], "no site_rules_pending: nothing is on the way");
+  assert.ok(log.includes("bare run weave/get-site-info"), "get-site-info was asked beside the route");
+
+  const sites = await call("wp_list_sites", {});
+  assert.equal(sites.sites[0].agent_rules, "none (no Block MCP)");
+
+  await wait(350);
+  const second = await call("wp_run", { ability_name: "weave/get-post" });
+  assert.deepEqual(Object.keys(second), ["site", "ability", "result"]);
+  assert.equal(log.filter((l) => l.includes("GET")).length, 1, "not asked again");
+  await close();
+});
+
+test("no Block MCP, call faster than the route: the pending line promises no rules, and nothing follows", async () => {
+  globalThis.fetch = fakeFleet(
+    { bare: { abilities: ["weave/get-site-info", "weave/get-post"], route: { status: 404, body: { code: "rest_no_route" }, delayMs: 200 } } },
+    [],
+  );
+  const { call, close } = await connect(configFor(["bare"]));
+
+  const first = await call("wp_run", { ability_name: "weave/get-post" });
+  assert.ok(first.site_rules_pending, "the 404 is not in yet, so the check is still running");
+  assert.doesNotMatch(first.site_rules_pending, /they come with the next wp_run/, "no promise of rules that may not exist");
+  assert.match(first.site_rules_pending, /Any rules the site sets come as site_rules with a later wp_run/);
+  assert.match(first.site_rules_pending, /Once a result here has no site_rules_pending, the check is done/);
+
+  await wait(250);
+  const second = await call("wp_run", { ability_name: "weave/get-post" });
+  assert.deepEqual(Object.keys(second), ["site", "ability", "result"], "the check is done and the site sets none");
+  const sites = await call("wp_list_sites", {});
+  assert.equal(sites.sites[0].agent_rules, "none (no Block MCP)");
+  await close();
+});
+
 test("Block MCP with empty instructions says so once, briefly", async () => {
   const log: Log = [];
   globalThis.fetch = fakeFleet(
@@ -493,13 +543,15 @@ test("wp_run_across is unchanged: no rules attached to a fan-out", async () => {
   await close();
 });
 
-test("decideRules: get-site-info's field wins, a route answer with text is enough, a 404 waits for get-site-info", () => {
+test("decideRules: get-site-info's field wins, a route answer with text is enough, and so is a 404", () => {
   const found = (source: string) => ({ kind: "found" as const, text: "Rules.", source });
   const budget = "5 seconds";
   assert.equal(decideRules(found("info"), found("route"), false, budget)?.source, "info");
   assert.equal(decideRules("pending", found("route"), false, budget)?.source, "route");
   assert.equal(decideRules(found("info"), "pending", false, budget)?.source, "info");
-  assert.equal(decideRules("pending", { kind: "absent" }, false, budget), undefined, "a 404 waits: get-site-info may still have it");
+  assert.deepEqual(decideRules("pending", { kind: "absent" }, false, budget), { kind: "absent" }, "a 404 settles it: no Block MCP, so no field");
+  assert.equal(decideRules(found("info"), { kind: "absent" }, false, budget)?.source, "info", "a field that is in still wins");
+  assert.equal(decideRules("pending", { kind: "failed", reason: "HTTP 403" }, false, budget), undefined, "a failure still waits for get-site-info");
   assert.deepEqual(decideRules("none", { kind: "absent" }, false, budget), { kind: "absent" });
   assert.deepEqual(decideRules("pending", { kind: "absent" }, true, budget), { kind: "absent" });
   assert.equal(decideRules("none", "pending", false, budget), undefined);

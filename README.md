@@ -86,7 +86,7 @@ repo, so it is untouched.
 | `wp_list_sites` | Sites + tags + ability counts + namespace groups. |
 | `wp_search_abilities` | Keyword search across sites; results grouped by site. |
 | `wp_get_ability` | Input/output schema for one ability on one site. |
-| `wp_run` | Execute an ability on **one** site (guarded). The first call on each site in a session also carries that site's agent rules, or the next call if they are not in yet (see below). |
+| `wp_run` | Execute an ability on **one** site (guarded). The first call on each site in a session also carries that site's agent rules, if it sets any, or a later call if they are not in yet (see below). |
 | `wp_run_across` | Execute the same ability on **many** sites in parallel. |
 | `wp_get_content_by_url` | Resolve a URL/path → post, optionally with full content. |
 
@@ -107,12 +107,19 @@ by the time that call returns, they come with a later `wp_run` on the site inste
   time, the route first. The route's answer is enough on its own, and get-site-info's is used
   when it has come in too, since it is the same text. When the agent's own call is
   `weave/get-site-info`, its result is read instead of asking twice. The route is fetched from the
-  same origin and with the same credentials as the MCP endpoint. A site without Block MCP gets
-  nothing added. If Block MCP is active with no rules set, the agent is told so in one line.
+  same origin and with the same credentials as the MCP endpoint. If Block MCP is active with no
+  rules set, the agent is told so in one line.
+- A site without Block MCP gets nothing added. The route answers 404 there, and that settles it
+  on its own: get-site-info only has the field when Block MCP is active, so the router does not
+  wait for it. (0.5.6 did wait, and a call that returned in between was told rules were coming
+  when the site had none.)
 - It never holds up the call. The lookup starts with the agent's call and the router never waits
-  for it. A result that goes back before the rules are in says so in a one-line
-  `site_rules_pending`, and the first `wp_run` on the site to return after they are in carries
-  them, marked `arrived_late` with a count of the calls that ran without them. A lookup gets 5 seconds before it counts as failed.
+  for it. A result that goes back before the lookup is done says so in a one-line
+  `site_rules_pending`. That line never promises rules, since the site may set none: it says any
+  rules the site sets come with a later call, and that the check is done once a result has no
+  `site_rules_pending`. If there are rules, the first `wp_run` on the site to return after they
+  are in carries them, marked `arrived_late` with a count of the calls that ran without them. If
+  there are none, later results carry nothing. A lookup gets 5 seconds before it counts as failed.
   A failure adds a one-line `site_rules_note` to the next result, and a later `wp_run` tries
   again, three tries a session at most. The text is capped at Block MCP's own 2,000 characters,
   with zero-width and bidi characters removed.
@@ -120,7 +127,7 @@ by the time that call returns, they come with a later `wp_run` on the site inste
   description tells agents to start each site with a read such as `weave/get-site-info`, and to
   read again while `site_rules_pending` shows.
 - `wp_list_sites` shows `agent_rules` for a site once the router knows them, without fetching.
-  `refresh: true` makes the next `wp_run` send the rules again.
+  `refresh: true` makes the next `wp_run` send the rules again, where the site sets any.
 - `wp_run_across` carries no rules: on a fan-out they would repeat once per site.
 
 ## Configuration
