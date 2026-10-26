@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { preflightAuthorizeUrl } from "../src/setup.js";
+import { looksLikeAppPassword, preflightAuthorizeUrl } from "../src/setup.js";
 
 const AUTHZ_PATH =
   "/wp-admin/authorize-application.php?app_name=wp-mcp-router&app_id=t&success_url=http%3A%2F%2F127.0.0.1%3A1%2Fcallback";
@@ -66,4 +66,15 @@ test("preflight rejects an unreachable site", async () => {
   const site = await siteAnswering(200);
   await site.close();
   await assert.rejects(preflightAuthorizeUrl(site.url), /Could not reach/);
+});
+
+test("an application password at the login prompt is caught, spaced or not", () => {
+  assert.equal(looksLikeAppPassword("abcd EFGH 1234 ijkl MNOP 5678"), true);
+  assert.equal(looksLikeAppPassword("  abcdEFGH1234ijklMNOP5678 "), true);
+});
+
+test("real logins are not mistaken for an application password", () => {
+  for (const login of ["weave_admin", "admin", "gareth@weave.co.nz", "abcd efgh", "abcdefghijklmnopqrstuvwx"]) {
+    assert.equal(looksLikeAppPassword(login), false, login);
+  }
 });

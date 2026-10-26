@@ -310,6 +310,18 @@ function escapeHtml(s: string): string {
 }
 
 /**
+ * True when `s` has the shape of a WordPress Application Password: 24 letters
+ * and digits, shown by WordPress as six groups of four separated by spaces, or
+ * pasted without the spaces. No login looks like that, so a match at the login
+ * prompt means the password went into the wrong box (blocks.weave.co.nz was
+ * saved that way on 26 October 2026, with the password in both fields).
+ */
+export function looksLikeAppPassword(s: string): boolean {
+  const t = s.trim();
+  return /^[A-Za-z0-9]{4}( [A-Za-z0-9]{4}){5}$/.test(t) || /^(?=.*\d)(?=.*[A-Za-z])[A-Za-z0-9]{24}$/.test(t);
+}
+
+/**
  * Manual fallback: open the authorize page WITHOUT a success_url so WordPress
  * shows the generated password on-screen, then have the user paste it back.
  * Works on every WordPress config — no localhost callback, so nothing for a
@@ -325,7 +337,7 @@ async function manualAuthorize(siteUrl: string): Promise<AuthResult> {
   log('Opening the WordPress "Authorize Application" page…');
   log('  1. Log in if prompted, then click "Yes, I approve of this connection".');
   log("  2. WordPress shows a generated application password — copy it.");
-  log("  3. Paste it below.");
+  log("  3. Below, enter your WordPress login first, then paste the password.");
   log();
   log("If your browser didn't open, visit this URL manually:");
   log(`  ${authorizeUrl}`);
@@ -336,15 +348,29 @@ async function manualAuthorize(siteUrl: string): Promise<AuthResult> {
   // only shows the app name and the password. So we ask. It's the username OR
   // email you sign in with; if unsure, it's on Users → Profile (the "Username"
   // field). The top-right "Howdy, <name>" is a display name, not the login.
-  const username = await prompt(
-    "Your WordPress login — the username or email you sign in with\n" +
-      "(if unsure, see the Username field on Users → Profile): ",
-  );
+  // The password is on the clipboard by now, so it is easy to paste it at the
+  // login prompt. A login never has a password's shape, so ask again.
+  let username = "";
+  for (let tries = 0; tries < 3; tries++) {
+    username = await prompt(
+      "Your WordPress login — the username or email you sign in with\n" +
+        "(if unsure, see the Username field on Users → Profile): ",
+    );
+    if (!looksLikeAppPassword(username)) break;
+    log("That looks like the application password, not your login. Enter the");
+    log("username or email you sign in with; the password comes next.");
+    username = "";
+  }
   const password = await prompt(
     "Application password from the approval page (paste it — spaces are fine): ",
   );
   if (!username.trim() || !password.trim()) {
     throw new Error("Login and application password are both required.");
+  }
+  if (username.replace(/\s+/g, "") === password.replace(/\s+/g, "")) {
+    throw new Error(
+      "The login and the application password are the same. Run add-site again: your login first, then the password.",
+    );
   }
   return { user_login: username.trim(), password: password.trim() };
 }

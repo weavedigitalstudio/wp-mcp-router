@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **`add-site` in paste mode now catches the application password at the
+  login prompt.** The steps said "Paste it below", and the first prompt below
+  asks for the login, so the password went into both fields and was saved
+  that way (blocks.weave.co.nz, 26 October 2026; every call then failed with
+  a 401). A login with a password's shape (24 letters and digits, spaced in
+  fours or not) is refused and asked for again, a login equal to the
+  password stops before anything is saved, and step 3 now says the login
+  comes first.
+- CI runs on the fork for the first time (GitHub keeps a fork's workflows
+  off until enabled), on Node 20, 22 and 24, with a manual run button.
+
 ## 0.5.7: a site without Block MCP is never promised rules
 
 - **A first `wp_run` on a site without Block MCP could be told rules were
